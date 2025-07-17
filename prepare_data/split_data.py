@@ -34,12 +34,15 @@ def process_video_all_frames(video_path: Path, save_root: Path):
     success, frame = cap.read()
 
     while success:
+
+        # if frame_idx % 30 != 0:
+        #     break
+
         # crop frame
         frame = frame[:-30, 47:-10]
         split_and_save_frame(frame, save_root, frame_idx)
         frame_idx += 1
         success, frame = cap.read()
-        # break
 
     cap.release()
 
@@ -51,7 +54,9 @@ def save_frame_to_video(image_path: Path, output_path: Path):
             continue
 
         frames = []
-        for img_file in sorted(view.glob("*.png")):
+        sorted_frames = sorted(view.glob("*.png"), key=lambda x: int(x.stem))
+
+        for img_file in sorted_frames:
             img = cv2.imread(str(img_file))
             if img is not None:
                 frames.append(img)
