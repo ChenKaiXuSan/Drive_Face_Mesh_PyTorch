@@ -1,62 +1,92 @@
-#!/usr/bin/env python3
-# -*- coding:utf-8 -*-
-"""
-File: /workspace/code/face_mesh.py
-Project: /workspace/code
-Created Date: Thursday July 17th 2025
-Author: Kaixu Chen
------
-Comment:
-
-Have a good code time :)
------
-Last Modified: Thursday July 17th 2025 4:58:47 pm
-Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.com>
------
-Copyright (c) 2025 The University of Tsukuba
------
-HISTORY:
-Date      	By	Comments
-----------	---	---------------------------------------------------------
-"""
 import cv2
 import mediapipe as mp
 
-# 初始化 Face Mesh
+# 初始化 mediapipe 模块（只初始化一次）
 mp_face_mesh = mp.solutions.face_mesh
-face_mesh = mp_face_mesh.FaceMesh(
-    static_image_mode=True, max_num_faces=1, refine_landmarks=True
-)
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
 
-# 读取图片
-img_path = "your_face_image.jpg"  # 替换为你的图像路径
-image_bgr = cv2.imread(img_path)
-image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+face_mesh_model = mp_face_mesh.FaceMesh(
+    static_image_mode=True, max_num_faces=1, refine_landmarks=True
+)
 
-# 人脸网格预测
-results = face_mesh.process(image_rgb)
 
-# 绘制面部网格
-if results.multi_face_landmarks:
-    for face_landmarks in results.multi_face_landmarks:
+def load_image(img_path: str):
+    """读取并转换为 RGB 图像"""
+    bgr_img = cv2.imread(img_path)
+    if bgr_img is None:
+        raise FileNotFoundError(f"Cannot load image: {img_path}")
+    rgb_img = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2RGB)
+    return bgr_img, rgb_img
+
+
+def predict_face_mesh(image_rgb):
+    """执行 FaceMesh 预测"""
+    results = face_mesh_model.process(image_rgb)
+    return results.multi_face_landmarks
+
+
+def draw_face_mesh(image_bgr, face_landmarks):
+    """在图像上绘制 mesh（contours + tessellation）"""
+    for landmarks in face_landmarks:
         mp_drawing.draw_landmarks(
             image=image_bgr,
-            landmark_list=face_landmarks,
+            landmark_list=landmarks,
             connections=mp_face_mesh.FACEMESH_TESSELATION,
             landmark_drawing_spec=None,
             connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_tesselation_style(),
         )
         mp_drawing.draw_landmarks(
             image=image_bgr,
-            landmark_list=face_landmarks,
+            landmark_list=landmarks,
             connections=mp_face_mesh.FACEMESH_CONTOURS,
             landmark_drawing_spec=None,
             connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_contours_style(),
         )
+    return image_bgr
 
-# 显示结果
-cv2.imshow("Face Mesh", image_bgr)
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+
+def process_video_with_face_mesh(
+    video_path: str, output_path: str = None, show: bool = False
+):
+    """逐帧处理视频中的人脸 mesh，可选保存输出视频"""
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise IOError(f"Failed to open video: {video_path}")
+
+    # 视频保存设置（可选）
+    writer = None
+    if output_path:
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
+    frame_idx = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        landmarks = predict_face_mesh(rgb_frame)
+
+        if landmarks:
+            frame = draw_face_mesh(frame, landmarks)
+
+        if show:
+            cv2.imshow("Face Mesh (Video)", frame)
+            if cv2.waitKey(1) & 0xFF == 27:  # ESC 退出
+                break
+
+        if writer:
+            writer.write(frame)
+
+        frame_idx += 1
+
+    cap.release()
+    if writer:
+        writer.release()
+    if show:
+        cv2.destroyAllWindows()
