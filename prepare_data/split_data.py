@@ -94,7 +94,9 @@ def process_videos(data_root: Path, image_output_path: Path, video_output_path: 
 
                     # save frame to video
                     print(f"[INFO] Finished processing: {video_file}")
-                    video_output_root = video_output_path / person_dir.stem
+                    video_output_root = (
+                        video_output_path / person_dir.stem / video_file.stem
+                    )
                     save_frame_to_video(image_output_root, video_output_root)
 
 
