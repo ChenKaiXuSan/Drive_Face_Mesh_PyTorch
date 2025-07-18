@@ -5,6 +5,19 @@
       "type": "debugpy",
       "request": "launch",
       "module": "enter-your-module-name"
+    },
+    {"name": "face_mesh",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "main",
+      "justMyCode": true,
+    },
+    {
+      "name": "prepare_data",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "prepare_data.main",
+      "justMyCode": true,
     }
   ]
 }

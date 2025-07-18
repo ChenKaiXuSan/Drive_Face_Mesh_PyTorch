@@ -20,32 +20,26 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 
-import cv2
-
-from face_mesh import load_image, predict_face_mesh, draw_face_mesh
+from face_mesh import process_video_with_face_mesh, process_image_with_face_mesh
 from pathlib import Path
 
+
 # TODO: 处理视频文件
-def process(img_path: str):
-    # 加载图像
-    image_bgr, image_rgb = load_image(img_path)
+def process(path, result_path=None):
 
-    # FaceMesh 预测
-    landmarks = predict_face_mesh(image_rgb)
-
-    # 绘制 mesh 并显示
-    if landmarks:
-        output_img = draw_face_mesh(image_bgr.copy(), landmarks)
-        cv2.imshow("Face Mesh", output_img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+    if path.suffix.lower() in [".jpg", ".jpeg", ".png"]:
+        process_image_with_face_mesh(path, show=False, output_path=result_path)
+    elif path.suffix.lower() in [".mp4"]:
+        process_video_with_face_mesh(path, show=False, output_path=result_path)
     else:
-        print("No face detected.")
+        raise ValueError(f"Unsupported file type: {path.suffix}")
 
 
 if __name__ == "__main__":
 
     video_input_dir = Path("/workspace/data/videos")
+    image_input_dir = Path("/workspace/data/image")
+    result_dir = Path("/workspace/data/result")
 
     for one_person in video_input_dir.iterdir():
         if not one_person.is_dir():
@@ -56,6 +50,8 @@ if __name__ == "__main__":
                 continue
 
             for video_file in video_dir.glob("*.mp4"):
+                _res_path = result_dir / one_person.name / video_dir.name
+
                 print(f"Processing video: {video_file}")
-                process(str(video_file))
+                process(path=video_file, result_path=_res_path / video_file.name)
                 print(f"Finished processing video: {video_file}")
