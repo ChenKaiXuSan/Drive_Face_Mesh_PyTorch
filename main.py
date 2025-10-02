@@ -30,7 +30,7 @@ def process(path, result_path=None):
     if path.suffix.lower() in [".jpg", ".jpeg", ".png"]:
         process_image_with_face_mesh(path, show=False, output_path=result_path)
     elif path.suffix.lower() in [".mp4"]:
-        process_video_with_face_mesh(path, show=False, output_path=result_path)
+        process_video_with_face_mesh(path, save_npz=True, output_path=result_path)
     else:
         raise ValueError(f"Unsupported file type: {path.suffix}")
 
