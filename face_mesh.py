@@ -46,7 +46,7 @@ def render_mesh_rgba(image_shape, face_landmarks_list, line_thick=1, transparent
     """返回 RGBA 图像，只画 mesh（背景透明或黑）"""
     h, w = image_shape[:2]
     # 背景透明：A=0；想要黑底就把 A=255, 颜色画线即可
-    canvas = np.zeros((h, w, 3), dtype=np.uint8)
+    canvas = np.zeros((h, w, 3), dtype=np.uint8) * 255 # 白色背景
     if not face_landmarks_list:
         return canvas
 
@@ -57,11 +57,11 @@ def render_mesh_rgba(image_shape, face_landmarks_list, line_thick=1, transparent
         # 画 tesselation
         for a, b in TES:
             pa, pb = pts[a], pts[b]
-            cv2.line(tmp, pa, pb, (255, 255, 255), line_thick, cv2.LINE_AA)
+            cv2.line(tmp, pa, pb, (0, 0, 0), line_thick, cv2.LINE_AA) # 黑色线
         # 画轮廓
         for a, b in CON:
             pa, pb = pts[a], pts[b]
-            cv2.line(tmp, pa, pb, (255, 255, 255), line_thick + 1, cv2.LINE_AA)
+            cv2.line(tmp, pa, pb, (255, 0, 0), line_thick + 1, cv2.LINE_AA) # 红色线
 
     # 转 RGBA：把非黑像素作为前景，设 alpha
     rgba = np.dstack([tmp, np.zeros((h, w), dtype=np.uint8)])

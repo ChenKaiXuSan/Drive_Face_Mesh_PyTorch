@@ -45,13 +45,10 @@ class CalibConfig:
     rational_model: bool = True  # enable k4..k6
     zero_tangent: bool = False  # set True if you know p1,p2≈0
     fast_check: bool = False  # speed-up chessboard detection
-    video_step: int = 8
-    video_max_frames: int | None = 300
-    video_warmup: int = 0
+    rotate_deg: int = 0  # rotate frames/images by deg (0/90/180/270)
     prune_top_ratio: float = 0.1  # auto-drop worst x% images once; set 0 to disable
     output_dir: str = "logs/calibration_vis"
-    output_npz: str = "camera_calibration/calibration_parameters.npz"
-    output_yml: str = "camera_calibration/calibration_parameters.yml"
+    step: int = 1  # frame sampling step for video
 
     @property
     def board_size(self) -> Tuple[int, int]:
@@ -74,13 +71,36 @@ VIDEO_EXTS = {
 IMG_EXTS = ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.JPG", "*.JPEG", "*.PNG", "*.BMP")
 
 
-def is_video_file(path: str | os.PathLike) -> bool:
+def is_image_dir(path: str | os.PathLike, recursive: bool = True) -> bool:
     p = Path(path)
-    return p.is_file() and (p.suffix in VIDEO_EXTS)
+
+    if not p.is_dir():
+        return False
+
+    it = p.rglob("*") if recursive else p.iterdir()
+    for fp in it:
+        try:
+            if fp.is_file() and fp.suffix.lower() in IMG_EXTS:
+                return True
+        except OSError:
+            continue
+    return False
 
 
-def is_image_dir(path: str | os.PathLike) -> bool:
-    return Path(path).is_dir()
+def is_video_folder(path: str | os.PathLike, recursive: bool = True) -> bool:
+    p = Path(path)
+    if not p.is_dir():
+        return False
+
+    it = p.rglob("*") if recursive else p.iterdir()
+    for fp in it:
+        # 某些路径可能因权限报错，忽略继续
+        try:
+            if fp.is_file() and fp.suffix.lower() in VIDEO_EXTS:
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def prepare_object_points(
@@ -130,6 +150,23 @@ def save_undistortion_comparison(
     cv2.imwrite(str(save_path), concat)
 
 
+def rotate_image(img: np.ndarray, deg: int) -> np.ndarray:
+    """Rotate by multiples of 90 quickly; arbitrary angle via warp (keeps size)."""
+    d = deg % 360
+    if d == 0:
+        return img
+    if d == 90:
+        return cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+    if d == 180:
+        return cv2.rotate(img, cv2.ROTATE_180)
+    if d == 270:
+        return cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    # arbitrary angle: rotate around center, keep canvas size
+    h, w = img.shape[:2]
+    M = cv2.getRotationMatrix2D((w / 2, h / 2), d, 1.0)
+    return cv2.warpAffine(img, M, (w, h))
+
+
 def load_images_from_dir(
     image_dir: str | os.PathLike, patterns: Sequence[str] = IMG_EXTS
 ) -> List[str]:
@@ -141,39 +178,37 @@ def load_images_from_dir(
 
 def sample_frames_from_video(
     video_path: str | os.PathLike,
-    *,
-    step: int = 10,
-    max_frames: int | None = None,
-    warmup: int = 0,
-    vis_dir: str | os.PathLike | None = None,
+    rotate_deg: int = 0,  # <-- 新增：抽帧阶段旋转
+    step: int = 1,
 ) -> List[Tuple[str, np.ndarray]]:
+    """Sample frames from a video. If rotate_deg!=0, rotate each sampled frame here."""
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         raise RuntimeError(f"Failed to open video: {video_path}")
-    frames: List[Tuple[str, np.ndarray]] = []
-    idx = -1
-    kept = 0
+
+    frames: dict[int, np.ndarray] = {}
+    idx = 0
+
     while True:
+
         ret, frame = cap.read()
         if not ret:
             break
+
+        # 按step间隔抽帧
+        if idx % step != 0:
+            idx += 1
+            continue
+
+        if rotate_deg % 360 != 0:
+            frame = rotate_image(frame, rotate_deg)
+
+        frames[idx] = frame.copy()
+
         idx += 1
-        if idx < warmup:
-            continue
-        if step > 1 and (idx % step != 0):
-            continue
-        name = f"frame_{idx:06d}"
-        frames.append((name, frame.copy()))
-        kept += 1
-        if max_frames is not None and kept >= max_frames:
-            break
+
     cap.release()
 
-    if vis_dir and frames:
-        outdir = Path(vis_dir) / "video_samples"
-        outdir.mkdir(parents=True, exist_ok=True)
-        for name, fr in frames[:10]:
-            cv2.imwrite(str(outdir / f"{name}.jpg"), fr)
     return frames
 
 
@@ -318,9 +353,9 @@ def valid_roi_fraction(
 
 
 def calibrate_camera(
-    images_or_frames: Sequence[Tuple[str, np.ndarray]], cfg: CalibConfig
+    images_or_frames: dict[int, np.ndarray], cfg: CalibConfig, file_name: str
 ) -> dict:
-    out_dir = Path(cfg.output_dir)
+    out_dir = Path(cfg.output_dir) / file_name
     out_dir.mkdir(parents=True, exist_ok=True)
     corners_dir = out_dir / "corners"
     corners_dir.mkdir(parents=True, exist_ok=True)
@@ -331,24 +366,29 @@ def calibrate_camera(
     used_names_full: List[str] | None = None
     objp = prepare_object_points(cfg.board_size, cfg.square_size)
 
+    LOG.info("Processing %s ", file_name)
+
     LOG.info("Detecting chessboard corners (%dx%d)...", cfg.board_cols, cfg.board_rows)
-    for i, (name, img) in enumerate(images_or_frames):
+    for i, img in images_or_frames.items():
+        idx = file_name
         if img is None:
-            LOG.warning("Empty image: %s", name)
+            LOG.warning("Empty image: %s_%i", idx, i)
             continue
+        img_r = img
         corners = find_chessboard_corners(
-            img, cfg.board_size, fast_check=cfg.fast_check
+            img_r, cfg.board_size, fast_check=cfg.fast_check
         )
         if corners is None:
-            LOG.debug("Chessboard not detected: %s", name)
+            LOG.debug("Chessboard not detected: %s_%i", idx, i)
             continue
         objpoints.append(objp)
         imgpoints.append(corners)
-        used_names.append(name)
-        if i < 200:  # avoid writing too many files
-            save_visualization(
-                img, corners, cfg.board_size, corners_dir / f"corners_{i+1:04d}.jpg"
-            )
+        used_names.append(str(i))
+
+        # 保存检测出来的frame
+        save_visualization(
+            img_r, corners, cfg.board_size, corners_dir / f"corners_{i+1:04d}.jpg"
+        )
 
     # Keep a copy of full list before pruning
     used_names_full = list(used_names)
@@ -356,7 +396,8 @@ def calibrate_camera(
     if not objpoints:
         return {"status": "Failed", "reason": "No corners detected", "num_images": 0}
 
-    h, w = images_or_frames[0][1].shape[:2]
+    # determine image size after rotation
+    h, w = images_or_frames[0].shape[:2]
 
     flags = 0
     if cfg.rational_model:
@@ -417,9 +458,11 @@ def calibrate_camera(
                 )
 
     # Save parameters (.npz + .yml)
-    Path(cfg.output_npz).parent.mkdir(parents=True, exist_ok=True)
+    output_npz = out_dir / "calibration_parameters.npz"
+    output_npz.parent.mkdir(parents=True, exist_ok=True)
+
     np.savez(
-        cfg.output_npz,
+        output_npz,
         camera_matrix=K,
         dist_coeffs=dist,
         rvecs=rvecs,
@@ -432,7 +475,8 @@ def calibrate_camera(
     )
 
     try:
-        fs = cv2.FileStorage(cfg.output_yml, cv2.FILE_STORAGE_WRITE)
+        output_yml = out_dir / "calibration_parameters.yaml"
+        fs = cv2.FileStorage(output_yml, cv2.FILE_STORAGE_WRITE)
         fs.write("image_width", int(w))
         fs.write("image_height", int(h))
         fs.write("camera_matrix", K)
@@ -450,16 +494,25 @@ def calibrate_camera(
         else (used_names[: len(per_img_df)] if used_names else [])
     )
     per_img_df["image_name"] = names_for_csv
-    per_img_csv = str(Path(cfg.output_dir) / "per_image_errors.csv")
+    per_img_csv = str(Path(out_dir) / "per_image_errors.csv")
     per_img_df.to_csv(per_img_csv, index=False)
 
     # Undistortion previews (limit number for speed)
-    vis_limit = min(len(used_names), 30)
-    for i, (name, img) in enumerate(images_or_frames[:vis_limit]):
-        if name in used_names[:vis_limit]:
-            save_undistortion_comparison(
-                img, K, dist, Path(cfg.output_dir) / f"undistort_{i+1:03d}.jpg"
-            )
+    undist_dir = out_dir / "undistort"
+    undist_dir.mkdir(parents=True, exist_ok=True)
+
+    vis_limit: int = min(len(used_names), 30)
+
+    for idx, used_idx in enumerate(used_names):
+
+        img_r = images_or_frames[int(used_idx)]
+
+        save_undistortion_comparison(
+            img_r, K, dist, undist_dir / f"undistort_{int(used_idx)}.jpg"
+        )
+
+        if idx >= vis_limit:
+            break
 
     result = {
         "status": "Success" if ret else "Failed",
@@ -480,12 +533,46 @@ def calibrate_camera(
     return result
 
 
-def calibrate_from_input(input_path: str | os.PathLike, cfg: CalibConfig) -> dict:
+def load_images_from_dir_recursive(
+    image_dir: str | os.PathLike, patterns: Sequence[str] = IMG_EXTS
+) -> List[str]:
+    """递归搜集目录及子目录中的所有图片路径"""
+    paths: List[str] = []
+    base = str(image_dir)
+    for pat in patterns:
+        # ** 匹配子目录
+        paths.extend(glob.glob(os.path.join(base, "**", pat), recursive=True))
+    return sorted(paths)
+
+
+def list_videos_in_dir(
+    dir_path: str | os.PathLike, recursive: bool = True
+) -> List[str]:
+    """（递归）列出目录中的所有视频文件"""
+    base = str(dir_path)
+    vids: List[str] = []
+    for ext in VIDEO_EXTS:
+        pattern = (
+            os.path.join(base, "**", f"*{ext}")
+            if recursive
+            else os.path.join(base, f"*{ext}")
+        )
+        vids.extend(glob.glob(pattern, recursive=recursive))
+    return sorted(vids)
+
+
+def calibrate_from_input(input_path: str | os.PathLike, cfg: CalibConfig) -> None:
     Path(cfg.output_dir).mkdir(parents=True, exist_ok=True)
+
+    res_dict = {}
+
     if is_image_dir(input_path):
+        # 先尝试当前目录非递归搜图
         img_paths = load_images_from_dir(input_path)
+        # 若为空，改用递归（支持子文件夹）
         if not img_paths:
-            raise RuntimeError(f"No images found under: {input_path}")
+            img_paths = load_images_from_dir_recursive(input_path)
+
         images = []
         for p in img_paths:
             im = cv2.imread(p)
@@ -493,22 +580,68 @@ def calibrate_from_input(input_path: str | os.PathLike, cfg: CalibConfig) -> dic
                 LOG.warning("Cannot read image: %s", p)
                 continue
             images.append((p, im))
-        return calibrate_camera(images, cfg)
-    elif is_video_file(input_path):
-        frames = sample_frames_from_video(
-            input_path,
-            step=cfg.video_step,
-            max_frames=cfg.video_max_frames,
-            warmup=cfg.video_warmup,
-            vis_dir=cfg.output_dir,
+        results = calibrate_camera(images, cfg)
+
+        res_dict[img_paths] = results
+
+    elif is_video_folder(input_path):
+        # 没有图片？那就递归找视频
+        video_paths = list_videos_in_dir(input_path, recursive=True)
+        for vp in video_paths:
+            vname = os.path.splitext(os.path.basename(vp))[0]
+            frames = sample_frames_from_video(
+                video_path=vp,
+                rotate_deg=cfg.rotate_deg,
+                step=cfg.step,
+            )
+            results = calibrate_camera(
+                images_or_frames=frames, cfg=cfg, file_name=vname
+            )
+
+            res_dict[vname] = results
+
+    print_result(res_dict=res_dict)
+
+
+def print_result(res_dict: dict):
+    for name, result in res_dict.items():
+
+        # Pretty print summary
+        summary = pd.DataFrame(
+            [
+                {
+                    "status": result.get("status"),
+                    "rms_reproj_error": result.get("rms_reproj_error"),
+                    "global_mean_px": result.get("global_mean_px"),
+                    "global_p95_px": result.get("global_p95_px"),
+                    "coverage_ratio": result.get("coverage_ratio"),
+                    "edge_points_ratio": result.get("edge_points_ratio"),
+                    "hfov_deg": result.get("hfov_deg"),
+                    "vfov_deg": result.get("vfov_deg"),
+                    "pp_off_x": (
+                        result.get("principal_point_offset_px")[0]
+                        if result.get("principal_point_offset_px")
+                        else None
+                    ),
+                    "pp_off_y": (
+                        result.get("principal_point_offset_px")[1]
+                        if result.get("principal_point_offset_px")
+                        else None
+                    ),
+                    "straight_before_px": result.get("straightness_rms_before_px"),
+                    "straight_after_px": result.get("straightness_rms_after_px"),
+                    "valid_roi_frac@alpha0": result.get("valid_roi_fraction_alpha0"),
+                    "num_used_images": result.get("num_images"),
+                    "image_size": result.get("image_size"),
+                    "dropped": len(result.get("dropped_names", [])),
+                }
+            ]
         )
-        if not frames:
-            raise RuntimeError(f"No frames sampled from video: {input_path}")
-        return calibrate_camera(frames, cfg)
-    else:
-        raise RuntimeError(
-            f"Invalid input_path. Not a directory or a known video file: {input_path}"
-        )
+        print("" + "=" * 60)
+        print(f"file name: {name}")
+        print("\n📌 Calibration Result Summary:")
+        print(summary)
+        print(f"Per-image error CSV: {result.get('per_image_csv')}")
 
 
 # ---------------------- CLI ----------------------
@@ -516,19 +649,21 @@ def calibrate_from_input(input_path: str | os.PathLike, cfg: CalibConfig) -> dic
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Camera calibration (images or video)")
-    p.add_argument("input", help="Directory of images or a video file path")
+    p.add_argument(
+        "--input",
+        type=str,
+        default="/workspace/data/camera_calibration",
+        help="Directory of images or a video file path",
+    )
     p.add_argument(
         "--board", type=str, default="9x6", help="Inner corners as CxR, e.g., 9x6"
     )
     p.add_argument(
         "--square", type=float, default=25.0, help="Square size in your length unit"
     )
+    p.add_argument("--step", type=int, default=30, help="Frame sampling step for video")
     p.add_argument("--out_dir", type=str, default="logs/calibration_vis")
-    p.add_argument("--out_npz", type=str, default="logs/calibration_vis/calibration_parameters.npz")
-    p.add_argument("--out_yml", type=str, default="logs/calibration_vis/calibration_parameters.yml")
-    p.add_argument("--step", type=int, default=8, help="Video sampling step")
-    p.add_argument("--max_frames", type=int, default=300)
-    p.add_argument("--warmup", type=int, default=0)
+
     p.add_argument("--fast_check", action="store_true")
     p.add_argument(
         "--no_rational", action="store_true", help="Disable rational distortion model"
@@ -539,6 +674,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.1,
         help="Drop top x ratio of worst images; 0=disable",
+    )
+    p.add_argument(
+        "--rotate_deg",
+        type=int,
+        default=0,
+        help="Rotate frames/images by deg (0/90/180/270)",
     )
     p.add_argument("-v", "--verbose", action="count", default=1)
     return p.parse_args()
@@ -555,53 +696,14 @@ def main() -> None:
         rational_model=not args.no_rational,
         zero_tangent=args.zero_tangent,
         fast_check=args.fast_check,
-        video_step=args.step,
-        video_max_frames=None if args.max_frames <= 0 else args.max_frames,
-        video_warmup=args.warmup,
         prune_top_ratio=max(0.0, min(0.9, args.prune)),
         output_dir=args.out_dir,
-        output_npz=args.out_npz,
-        output_yml=args.out_yml,
+        rotate_deg=args.rotate_deg,
+        step=args.step,
     )
     LOG.info("Config: %s", cfg)
 
-    result = calibrate_from_input(args.input, cfg)
-
-    # Pretty print summary
-    summary = pd.DataFrame(
-        [
-            {
-                "status": result.get("status"),
-                "rms_reproj_error": result.get("rms_reproj_error"),
-                "global_mean_px": result.get("global_mean_px"),
-                "global_p95_px": result.get("global_p95_px"),
-                "coverage_ratio": result.get("coverage_ratio"),
-                "edge_points_ratio": result.get("edge_points_ratio"),
-                "hfov_deg": result.get("hfov_deg"),
-                "vfov_deg": result.get("vfov_deg"),
-                "pp_off_x": (
-                    result.get("principal_point_offset_px")[0]
-                    if result.get("principal_point_offset_px")
-                    else None
-                ),
-                "pp_off_y": (
-                    result.get("principal_point_offset_px")[1]
-                    if result.get("principal_point_offset_px")
-                    else None
-                ),
-                "straight_before_px": result.get("straightness_rms_before_px"),
-                "straight_after_px": result.get("straightness_rms_after_px"),
-                "valid_roi_frac@alpha0": result.get("valid_roi_fraction_alpha0"),
-                "num_used_images": result.get("num_images"),
-                "image_size": result.get("image_size"),
-                "dropped": len(result.get("dropped_names", [])),
-            }
-        ]
-    )
-    print("\n📌 Calibration Result Summary:")
-    print(summary)
-    print(f"Per-image error CSV: {result.get('per_image_csv')}")
-    print(f"Params saved: {cfg.output_npz} , {cfg.output_yml}")
+    calibrate_from_input(args.input, cfg)
 
 
 if __name__ == "__main__":

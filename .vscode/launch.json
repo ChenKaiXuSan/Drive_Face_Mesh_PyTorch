@@ -6,7 +6,8 @@
       "request": "launch",
       "module": "enter-your-module-name"
     },
-    {"name": "face_mesh",
+    {
+      "name": "face_mesh",
       "type": "debugpy",
       "request": "launch",
       "module": "main",
@@ -18,6 +19,12 @@
       "request": "launch",
       "module": "prepare_data.main",
       "justMyCode": true,
+    },
+    {
+      "name": "calibrate_cameras",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "camera_calibration.main",
     }
   ]
 }
