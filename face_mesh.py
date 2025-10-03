@@ -39,29 +39,28 @@ def save_landmarks_to_npz(
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     np.savez_compressed(out_path, **save_info)
-    print(f"[✓] Saved landmarks to {out_path}")
 
 
 def render_mesh_rgba(image_shape, face_landmarks_list, line_thick=1, transparent=True):
     """返回 RGBA 图像，只画 mesh（背景透明或黑）"""
     h, w = image_shape[:2]
-    # 背景透明：A=0；想要黑底就把 A=255, 颜色画线即可
-    canvas = np.zeros((h, w, 3), dtype=np.uint8) * 255 # 白色背景
+
+    # 临时 BGR 画布
+    tmp = np.zeros((h, w, 3), dtype=np.uint8)
     if not face_landmarks_list:
-        return canvas
+        return np.dstack([tmp, np.zeros((h, w), dtype=np.uint8)])
 
     # 在一个临时 BGR 画布上画线，再转到 RGBA 作为前景
-    tmp = np.zeros((h, w, 3), dtype=np.uint8)
     for lm in face_landmarks_list:
         pts = [(int(p.x * w), int(p.y * h)) for p in lm.landmark]
         # 画 tesselation
         for a, b in TES:
             pa, pb = pts[a], pts[b]
-            cv2.line(tmp, pa, pb, (0, 0, 0), line_thick, cv2.LINE_AA) # 黑色线
+            cv2.line(tmp, pa, pb, (0, 0, 0), line_thick, cv2.LINE_AA)  # 黑色线
         # 画轮廓
         for a, b in CON:
             pa, pb = pts[a], pts[b]
-            cv2.line(tmp, pa, pb, (255, 0, 0), line_thick + 1, cv2.LINE_AA) # 红色线
+            cv2.line(tmp, pa, pb, (255, 0, 0), line_thick + 1, cv2.LINE_AA)  # 红色线
 
     # 转 RGBA：把非黑像素作为前景，设 alpha
     rgba = np.dstack([tmp, np.zeros((h, w), dtype=np.uint8)])
@@ -161,6 +160,11 @@ def process_video_with_face_mesh(
     max_faces: int = 1,
 ):
     """逐帧处理视频中的人脸 mesh，可选保存输出视频"""
+    # 跳过drive view视频
+    if "dive" in video_path.name.lower():
+        print(f"[!] Skipping drive view video: {video_path}")
+        return
+
     if not video_path.exists():
         raise FileNotFoundError(f"Video file not found: {video_path}")
     cap = cv2.VideoCapture(str(video_path))
@@ -227,7 +231,9 @@ def process_video_with_face_mesh(
             if writer_video:
                 writer_video.write(frame)
             if writer_mesh:
-                writer_mesh.write(mesh_rgba)
+                # TODO：这里保存mesh的时候有问题，保存的视频用不了
+                # mesh_bgra = cv2.cvtColor(mesh_rgba, cv2.COLOR_RGBA2BGRA)
+                writer_mesh.write(mesh_rgba)  # 写入 BGRA
 
             # save landmarks to npz
             save_info[str(frame_id)] = {
