@@ -7,6 +7,16 @@ Created Date: Thursday July 17th 2025
 Author: Kaixu Chen
 -----
 Comment:
+Use prepare_mesh/face_mesh.py to process videos and images for 3D face mesh reconstruction.
+And save the results in a structured directory.
+
+The structure is as follows:
+save_info[str(frame_id)] = {
+                "raw_frame": rgb_frame,
+                "mesh": (
+                    landmarks_to_numpy(landmarks, frame.shape) if landmarks else None
+                ),
+            }
 
 Have a good code time :)
 -----
@@ -20,7 +30,10 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 
-from prepare_mesh.face_mesh import process_video_with_face_mesh, process_image_with_face_mesh
+from prepare_mesh.face_mesh import (
+    process_video_with_face_mesh,
+    process_image_with_face_mesh,
+)
 from pathlib import Path
 
 
