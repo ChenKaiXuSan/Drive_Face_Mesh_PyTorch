@@ -229,6 +229,8 @@ def process_video_with_face_mesh(
                 "mesh": (
                     landmarks_to_numpy(landmarks, frame.shape) if landmarks else None
                 ),
+                "video_info": {"fps": cap.get(cv2.CAP_PROP_FPS), "width": width, "height": height},
+                "video_path": str(video_path),
             }
 
             # if frame_id > 20:  # 测试时只跑20帧
