@@ -20,7 +20,7 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 
-from face_mesh import process_video_with_face_mesh, process_image_with_face_mesh
+from prepare_mesh.face_mesh import process_video_with_face_mesh, process_image_with_face_mesh
 from pathlib import Path
 
 
@@ -39,7 +39,7 @@ if __name__ == "__main__":
 
     video_input_dir = Path("/workspace/data/videos")
     image_input_dir = Path("/workspace/data/image")
-    result_dir = Path("/workspace/data/result")
+    result_dir = Path("/workspace/data/mesh")
 
     for one_person in video_input_dir.iterdir():
         if not one_person.is_dir():

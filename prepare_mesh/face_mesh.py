@@ -1,6 +1,6 @@
 import cv2
 import mediapipe as mp
-from typing import Tuple, Optional, List
+from typing import Tuple, Optional
 from pathlib import Path
 import numpy as np
 
@@ -20,7 +20,7 @@ def landmarks_to_numpy(face_landmarks_list, image_shape):
     h, w = image_shape[:2]
     all_faces = []
     for lm in face_landmarks_list:
-        pts = [(p.x * w, p.y * h, p.z * max(w, h)) for p in lm.landmark]
+        pts = [(p.x * w, p.y * h, p.z) for p in lm.landmark]
         all_faces.append(pts)
     return np.array(all_faces, dtype=np.float32)
 
@@ -172,7 +172,6 @@ def process_video_with_face_mesh(
         raise IOError(f"Failed to open video: {video_path}")
 
     writer_video = None
-    writer_mesh = None
     if output_path:
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -185,14 +184,7 @@ def process_video_with_face_mesh(
         writer_video = cv2.VideoWriter(
             str(output_video_path), fourcc, fps, (width, height)
         )
-        # mesh path
-        out_mesh_path = (
-            output_path.parent / "meshes" / (output_path.stem + "_meshes.mp4")
-        )
-        out_mesh_path.parent.mkdir(parents=True, exist_ok=True)
-        writer_mesh = cv2.VideoWriter(
-            str(out_mesh_path), fourcc, fps, (width, height), True
-        )
+
         # npz path
         out_npz_path = output_path.parent / "npz" / (output_path.stem + ".npz")
         out_npz_path.parent.mkdir(parents=True, exist_ok=True)
@@ -230,23 +222,16 @@ def process_video_with_face_mesh(
 
             if writer_video:
                 writer_video.write(frame)
-            if writer_mesh:
-                # TODO：这里保存mesh的时候有问题，保存的视频用不了
-                # mesh_bgra = cv2.cvtColor(mesh_rgba, cv2.COLOR_RGBA2BGRA)
-                writer_mesh.write(mesh_rgba)  # 写入 BGRA
 
             # save landmarks to npz
             save_info[str(frame_id)] = {
                 "raw_frame": rgb_frame,
-                "drawn_frame": frame,
-                "frame_mesh": mesh_rgba,
                 "mesh": (
                     landmarks_to_numpy(landmarks, frame.shape) if landmarks else None
                 ),
-                "landmarks": landmarks,
             }
 
-            # if frame_id > 10:  # 测试时只跑10帧
+            # if frame_id > 20:  # 测试时只跑20帧
             #     break
 
     cap.release()
@@ -254,9 +239,6 @@ def process_video_with_face_mesh(
     if writer_video:
         writer_video.release()
         print(f"[✓] Saved video output to {output_path}")
-    if writer_mesh:
-        writer_mesh.release()
-        print(f"[✓] Saved video mesh output to {out_mesh_path}")
 
     if save_npz and save_info:
         save_landmarks_to_npz(save_info, out_path=out_npz_path)
