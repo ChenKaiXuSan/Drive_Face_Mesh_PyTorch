@@ -1,3 +1,27 @@
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
+"""
+File: /workspace/code/prepare_mesh/face_mesh.py
+Project: /workspace/code/prepare_mesh
+Created Date: Thursday July 17th 2025
+Author: Kaixu Chen
+-----
+Comment:
+This module uses MediaPipe FaceMesh to process images and videos, extracting 3D face landmarks and rendering face meshes.
+It supports both single image and video processing, saving results in structured directories.
+
+Have a good code time :)
+-----
+Last Modified: Thursday July 17th 2025 4:58:47 pm
+Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.com>
+-----
+Copyright (c) 2025 The University of Tsukuba
+-----
+HISTORY:
+Date      	By	Comments
+----------	---	---------------------------------------------------------
+"""
+
 import cv2
 import mediapipe as mp
 from typing import Tuple, Optional
@@ -229,7 +253,11 @@ def process_video_with_face_mesh(
                 "mesh": (
                     landmarks_to_numpy(landmarks, frame.shape) if landmarks else None
                 ),
-                "video_info": {"fps": cap.get(cv2.CAP_PROP_FPS), "width": width, "height": height},
+                "video_info": {
+                    "fps": cap.get(cv2.CAP_PROP_FPS),
+                    "width": width,
+                    "height": height,
+                },
                 "video_path": str(video_path),
             }
 

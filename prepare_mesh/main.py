@@ -37,7 +37,6 @@ from prepare_mesh.face_mesh import (
 from pathlib import Path
 
 
-# TODO: 处理视频文件
 def process(path, result_path=None):
 
     if path.suffix.lower() in [".jpg", ".jpeg", ".png"]:
