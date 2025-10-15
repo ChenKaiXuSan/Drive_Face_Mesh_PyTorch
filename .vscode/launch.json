@@ -7,13 +7,6 @@
       "module": "enter-your-module-name"
     },
     {
-      "name": "face_mesh",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "main",
-      "justMyCode": true,
-    },
-    {
       "name": "prepare_data",
       "type": "debugpy",
       "request": "launch",
@@ -25,6 +18,15 @@
       "type": "debugpy",
       "request": "launch",
       "module": "camera_calibration.main",
+    },
+    {
+      "name": "mesh_triangulation",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "mesh_triangulation.main",
+      "args": [
+        "paths.mesh_path=/workspace/data/npz_debug"
+      ]
     }
   ]
 }

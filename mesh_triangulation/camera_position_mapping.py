@@ -328,9 +328,7 @@ def draw_cameras_matplotlib(
 
         # frustum
         K = None if K_map is None else K_map.get(cid, None)
-        corners = _frustum_corners_world(
-            ext, K, img_size.get(cid), depth=frustum_depth
-        )  # (3,4)
+        corners = _frustum_corners_world(ext, K, img_size, depth=frustum_depth)  # (3,4)
 
         order = [0, 1, 2, 3, 0]  # rim
         ax.plot(corners[0, order], corners[1, order], corners[2, order], color="orange")
@@ -449,6 +447,106 @@ def prepare_camera_position(
 
     # —— 可视化 & 多视图导出 ——
     K_map = {cid: K for cid in CAMERA_LAYOUT.keys()}
+
+    draw_cameras_matplotlib(
+        extr_map,
+        K_map=K_map,
+        img_size=img_size,
+        frustum_depth=0.6,
+        axis_len=0.25,
+        save_path=os.path.join(output_path, "camera_poses.png"),
+    )
+    save_multi_views(
+        extr_map,
+        K_map=K_map,
+        img_size=img_size,
+        save_prefix=os.path.join(output_path, "camera_poses"),
+    )
+
+    return {
+        "layout": CAMERA_LAYOUT,  # {cid: {"pos": (x, y, z), "target": T}}
+        "extrinsics_map": extr_map,  # {cid: Extrinsics}
+        "K_map": K_map,  # {cid: K}
+        "rt_info": rt_info,  # {cid: {"R": R_wc, "t": t_wc, "C": C}}
+    }
+
+
+def prepare_camera_position(
+    K: Dict[str, np.array],
+    T: Tuple[float, float, float],
+    z: float,
+    output_path: Optional[str] = None,
+    img_size: Optional[Tuple[int, int]] = None,
+    dist_front: float = 0.62,
+    dist_left: float = 0.85,
+    dist_right: float = 0.85,
+    baseline: float = 0.70,
+) -> Dict[int, Dict]:
+    """
+    准备相机位置数据，返回字典格式，包含相机ID、位置和朝向信息。
+
+    Args:
+        extrinsics_map (Dict[int, Extrinsics]): 包含相机外参的字典，键为相机ID，值为Extrinsics对象。
+
+    Returns:
+        Dict[int, Dict]: 包含相机位置和朝向信息的字典，键为相机ID，值为包含位置和朝向的字典。
+    """
+    CAMERA_LAYOUT: Dict[str, Dict[str, any]] = {}
+
+    # 计算左右相机的坐标
+    x_half = baseline / 2
+    y_side = math.sqrt(dist_left**2 - x_half**2)  # ≈ 0.7746
+
+    CAMERA_LAYOUT = {
+        "front": {
+            "pos": (0.0, dist_front, z),
+            "target": T,
+            "yaw": 180.0,  # 正前方相机 → 朝向目标
+            "K": np.array(K["front"]).reshape(3, 3),
+        },
+        "left": {
+            "pos": (-x_half, y_side, z),
+            "target": T,
+            "yaw": math.degrees(math.atan2(0.0 - y_side, 0.0 - (-x_half))),  # ≈ -115.5°
+            "K": np.array(K["left"]).reshape(3, 3),
+        },
+        "right": {
+            "pos": (x_half, y_side, z),
+            "target": T,
+            "yaw": math.degrees(math.atan2(0.0 - y_side, 0.0 - x_half)),  # ≈ -65.5°
+            "K": np.array(K["right"]).reshape(3, 3),
+        },
+    }
+
+    extr_map = build_extrinsics_map(CAMERA_LAYOUT)
+
+    # —— 打印外参摘要 ——
+    for cid, ext in sorted(extr_map.items()):
+        print(f"[Cam {cid}]")
+        print(
+            "R_wc=\n",
+            np.array2string(ext.R_wc, formatter={"float_kind": lambda x: f"{x: .5f}"}),
+        )
+        print(
+            "t_wc=",
+            np.array2string(ext.t_wc, formatter={"float_kind": lambda x: f"{x: .5f}"}),
+        )
+        print(
+            "C(w) =",
+            np.array2string(ext.C, formatter={"float_kind": lambda x: f"{x: .5f}"}),
+        )
+        print()
+
+    rt_info = dict()
+    for cid, ext in extr_map.items():
+        rt_info[cid] = {
+            "R": ext.R_wc,
+            "t": ext.t_wc,
+            "C": ext.C,
+        }
+
+    # —— 可视化 & 多视图导出 ——
+    K_map = {cid: param['K'] for cid, param in CAMERA_LAYOUT.items() if "K" in param}
 
     draw_cameras_matplotlib(
         extr_map,

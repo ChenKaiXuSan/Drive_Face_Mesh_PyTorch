@@ -11,26 +11,25 @@ Last Modified: August 4th, 2025
 import os
 import numpy as np
 import cv2
-import torch
-from torchvision.io import read_video
-import glob
 from pathlib import Path
-import matplotlib
+import torch
+
+import logging
+
+logger = logging.getLogger(__name__)
+
 import hydra
+
+import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import plotly.graph_objs as go
-import plotly.offline as py
 
-from triangulation.camera_position import (
-    estimate_camera_pose_from_sift_imgs,
-    estimate_pose,
-    to_gray_cv_image,
-    visualize_SIFT_matches,
-)
 
-from triangulation.camera_position_mapping import prepare_camera_position
+from mesh_triangulation.camera_position_mapping import prepare_camera_position
+from mesh_triangulation.load import load_mesh_from_npz
+from mesh_triangulation.multi_triangulation import triangulate_with_missing
+
 
 # ---------- 可视化工具 ----------
 def draw_and_save_keypoints_from_frame(
@@ -93,26 +92,6 @@ def draw_camera(ax, R, T, scale=0.1, label="Cam"):
     ax.text(*origin, label, color="black")
 
 
-
-
-# ---------- 三角测量 ----------
-def triangulate_joints(keypoints1, keypoints2, K, R, T):
-    if keypoints1.shape != keypoints2.shape or keypoints1.shape[1] != 2:
-        raise ValueError(
-            f"Keypoints shape mismatch: {keypoints1.shape} vs {keypoints2.shape}"
-        )
-
-    if keypoints1.dtype == object:
-        keypoints1 = np.array([kp for kp in keypoints1], dtype=np.float32)
-    if keypoints2.dtype == object:
-        keypoints2 = np.array([kp for kp in keypoints2], dtype=np.float32)
-
-    P1 = K @ np.hstack((np.eye(3), np.zeros((3, 1))))
-    P2 = K @ np.hstack((R, T.reshape(3, 1)))
-    pts_4d = cv2.triangulatePoints(P1, P2, keypoints1.T, keypoints2.T)
-    return (pts_4d[:3, :] / pts_4d[3, :]).T
-
-
 def visualize_3d_joints(joints_3d, R, T, save_path, title="Triangulated 3D Joints"):
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     fig = plt.figure()
@@ -133,243 +112,195 @@ def visualize_3d_joints(joints_3d, R, T, save_path, title="Triangulated 3D Joint
     print(f"[INFO] Saved: {save_path}")
 
 
-def visualize_3d_scene_interactive(joints_3d, R, T, save_path):
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter3d(
-            x=joints_3d[:, 0],
-            y=joints_3d[:, 1],
-            z=joints_3d[:, 2],
-            mode="markers+text",
-            text=[str(i) for i in range(len(joints_3d))],
-            marker=dict(size=4, color="blue"),
-        )
-    )
-
-    def get_camera_lines(R, T, label):
-        scale = 0.1
-        lines = []
-        axes = [np.array([1, 0, 0]), np.array([0, 1, 0]), np.array([0, 0, 1])]
-        colors = ["red", "green", "blue"]
-        origin = T.reshape(3)
-        for axis, color in zip(axes, colors):
-            end = R @ axis * scale + origin
-            lines.append(
-                go.Scatter3d(
-                    x=[origin[0], end[0]],
-                    y=[origin[1], end[1]],
-                    z=[origin[2], end[2]],
-                    mode="lines",
-                    line=dict(color=color, width=4),
-                )
-            )
-        view_dir = R @ np.array([0, 0, -1]) * scale * 1.5 + origin
-        lines.append(
-            go.Scatter3d(
-                x=[origin[0], view_dir[0]],
-                y=[origin[1], view_dir[1]],
-                z=[origin[2], view_dir[2]],
-                mode="lines",
-                line=dict(color="black", width=2, dash="dash"),
-                name=f"{label}_view",
-            )
-        )
-        return lines
-
-    for trace in get_camera_lines(np.eye(3), np.zeros(3), "Cam1"):
-        fig.add_trace(trace)
-    for trace in get_camera_lines(R, T, "Cam2"):
-        fig.add_trace(trace)
-
-    fig.update_layout(
-        scene=dict(xaxis_title="X", yaxis_title="Y", zaxis_title="Z"),
-        title="Interactive 3D Scene",
-        margin=dict(l=0, r=0, b=0, t=30),
-    )
-    py.plot(fig, filename=save_path, auto_open=False)
-    print(f"[INFO] Saved interactive HTML to: {save_path}")
-
-
-# ---------- 加载关键点 ----------
-def load_keypoints_from_pt(file_path):
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Missing file: {file_path}")
-    print(f"[INFO] Loading: {file_path}")
-    data = torch.load(file_path, map_location="cpu")
-    video_path = data.get("video_path", None)
-    vframes = (
-        read_video(video_path, pts_unit="sec", output_format="THWC")[0]
-        if video_path
-        else None
-    )
-    keypoints = np.array(data["keypoint"]["keypoint"]).squeeze(0)
-    if keypoints.ndim != 3 or keypoints.shape[2] != 2:
-        raise ValueError(f"Invalid shape: {keypoints.shape}")
-    if vframes is not None:
-        keypoints[:, :, 0] *= vframes.shape[2]
-        keypoints[:, :, 1] *= vframes.shape[1]
-    return keypoints, vframes
-
-
-def load_keypoints_from_npz(npz_path, key="keypoints"):
+def resize_frame_and_mesh(frame: np.ndarray, mesh: np.ndarray, new_size):
     """
-    从 .npz 文件加载 keypoints 数据
-
+    同时缩放图像 frame 和 mesh 坐标
     参数:
-        npz_path (str): .npz 文件路径
-        key (str): 读取的 key，默认 'keypoints'
-
+      frame: np.ndarray, 形状 (H, W, 3)
+      mesh: np.ndarray, 形状 (N, 3)
+      new_size: (new_w, new_h)
     返回:
-        np.ndarray: 关键点数据 (形状可能是 N x K x 2 或 N x K x 3)
+      frame_resized, mesh_rescaled
     """
-    if not os.path.exists(npz_path):
-        raise FileNotFoundError(f"文件不存在: {npz_path}")
+    h, w = frame.shape[:2]
+    new_w, new_h = new_size
 
-    data = np.load(npz_path, allow_pickle=True)
+    # 图像缩放
+    frame_resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
-    if key not in data:
-        raise KeyError(f"{npz_path} 中没有 key '{key}'，可选 keys: {list(data.keys())}")
+    # 坐标缩放比例
+    sx, sy = new_w / w, new_h / h
 
-    kpts = data[key]
-    print(f"加载完成: {npz_path}")
-    print(f"key '{key}' 的 shape: {kpts.shape}")
-
-    kpts = kpts.squeeze()
-    kpts = kpts.transpose((0, 2, 1))
-    # delete the z-coordinate
-    kpts = kpts[:, :, :2]
-
-    # load video frames
-    raw_video_path = Path("/workspace/data/raw/suwabe")
-    video_path = list(raw_video_path.glob(f"{npz_path.parent.stem}/{npz_path.stem}*"))[
-        0
-    ]
-    if video_path:
-        video_frames = read_video(video_path, pts_unit="sec", output_format="THWC")[0]
-
-    # 视频的frame向右旋转90°
-    # video_frames = torch.rot90(video_frames, k=-1, dims=(1, 2))
-    video_frames = np.rot90(video_frames, k=-1, axes=(1, 2)).copy()
-
-    return kpts, video_frames
+    # 缩放 mesh 坐标
+    mesh_rescaled = np.asarray(mesh, dtype=np.float32).copy()
+    mesh_rescaled[:, 0] *= sx  # x 方向缩放
+    mesh_rescaled[:, 1] *= sy  # y 方向缩放
+    # z 一般保持不变（除非是相机空间深度）
+    return frame_resized, mesh_rescaled
 
 
 # ---------- 主处理函数 ----------
-def process_one_video(left_path, right_path, output_path):
+def process_one_video(environment_dir: dict[str, Path], output_path: Path, rt_info, K):
+
     os.makedirs(output_path, exist_ok=True)
-    left_kpts, left_vframes = load_keypoints_from_npz(left_path)
-    right_kpts, right_vframes = load_keypoints_from_npz(right_path)
 
-    # 如果视频长度不一样，按照短的视频进行对齐
-    if left_kpts.shape[0] != right_kpts.shape[0]:
-        min_frames = min(left_kpts.shape[0], right_kpts.shape[0])
-        left_kpts = left_kpts[:min_frames]
-        right_kpts = right_kpts[:min_frames]
+    front_frames, front_mesh, front_video_info = load_mesh_from_npz(
+        environment_dir["front"]
+    )
+    if front_frames is None:
+        print(f"[WARN] No front view data found in {environment_dir['front']}")
+        return
 
-    for i in range(min(6, left_kpts.shape[0])):
-        l_kpt, r_kpt = left_kpts[i], right_kpts[i]
+    left_frames, left_mesh, left_video_info = load_mesh_from_npz(
+        environment_dir["left"]
+    )
+    right_frames, right_mesh, right_video_info = load_mesh_from_npz(
+        environment_dir["right"]
+    )
 
-        # drop the 0 value keypoints
-        assert (
-            l_kpt.shape == r_kpt.shape
-        ), f"Keypoints shape mismatch: {l_kpt.shape} vs {r_kpt.shape}"
+    if left_frames is None or right_frames is None:
+        print(f"[WARN] Missing left or right view data in {environment_dir}")
+        return
 
-        # if 0 value find in left or right keypoints, drop them
-        # 把为0的点替换成 np.nan（防止误差）
-        # l_kpt[l_kpt == 0] = np.nan
-        # r_kpt[r_kpt == 0] = np.nan
+    # * 确保三视点帧数一致
+    if (
+        left_frames.shape[0] != right_frames.shape[0]
+        or left_frames.shape[0] != front_frames.shape[0]
+        or right_frames.shape[0] != front_frames.shape[0]
+    ):
+        min_frames = min(
+            left_frames.shape[0], right_frames.shape[0], front_frames.shape[0]
+        )
+        left_frames = left_frames[:min_frames]
+        left_mesh = left_mesh[:min_frames]
+        right_frames = right_frames[:min_frames]
+        right_mesh = right_mesh[:min_frames]
+        front_frames = front_frames[:min_frames]
+        front_mesh = front_mesh[:min_frames]
 
-        # 创建有效掩码：左右关键点都不是 nan 的点
-        # valid_mask = ~np.isnan(l_kpt).any(axis=1) & ~np.isnan(r_kpt).any(axis=1)
+        logger.warning(
+            f"Aligned all views to {min_frames} frames based on the shortest video."
+        )
+    else:
+        min_frames = left_frames.shape[0]
 
-        # 过滤左右关键点
-        # l_kpt = l_kpt[valid_mask]
-        # r_kpt = r_kpt[valid_mask]
+    for i in range(min_frames):
 
-        l_frame = left_vframes[i] if left_vframes is not None else None
-        r_frame = right_vframes[i] if right_vframes is not None else None
+        f_mesh = front_frames[i]
+        l_mesh = left_frames[i]
+        r_mesh = right_frames[i]
 
-        if l_frame is not None and r_frame is not None:
-            draw_and_save_keypoints_from_frame(
-                l_frame,
-                l_kpt,
-                os.path.join(output_path, f"frames/left/{i:04d}.png"),
-                color=(0, 255, 0),
+        f_frame = front_frames[i]
+        l_frame = left_frames[i]
+        r_frame = right_frames[i]
+
+        # * 确保三视点图像尺寸一致
+        if (
+            f_frame.shape[1:3] != l_frame.shape[1:3]
+            or f_frame.shape[1:3] != r_frame.shape[1:3]
+            or l_frame.shape[1:3] != r_frame.shape[1:3]
+        ):
+
+            # 统一目标尺寸（取最大值）
+            target_h = max(f_mesh.shape[0], l_mesh.shape[0], r_mesh.shape[0])
+            target_w = max(f_mesh.shape[1], l_mesh.shape[1], r_mesh.shape[1])
+            
+            f_frame_resized, f_mesh_rescaled = resize_frame_and_mesh(
+                f_frame, f_mesh, (target_w, target_h)
             )
-            draw_and_save_keypoints_from_frame(
-                r_frame,
-                r_kpt,
-                os.path.join(output_path, f"frames/right/{i:04d}.png"),
-                color=(0, 0, 255),
+            l_frame_resized, l_mesh_rescaled = resize_frame_and_mesh(
+                l_frame, l_mesh, (target_w, target_h)
+            )
+            r_frame_resized, r_mesh_rescaled = resize_frame_and_mesh(
+                r_frame, r_mesh, (target_w, target_h)
             )
 
-        R, T, pts1, pts2, mask_pose = estimate_camera_pose_from_sift_imgs(
-            to_gray_cv_image(l_frame),
-            to_gray_cv_image(r_frame),
-            K,
+        observations = {
+            "front": f_mesh_rescaled[:, :, :2],
+            "left": l_mesh_rescaled[:, :, :2],
+            "right": r_mesh_rescaled[:, :, :2],
+        }
+
+        mesh_3d = triangulate_with_missing(
+            observations=observations,
+            extrinsics=rt_info,
+            Ks=K,
+            max_err_px=8.0,
         )
 
-        visualize_SIFT_matches(
-            to_gray_cv_image(l_frame),
-            to_gray_cv_image(r_frame),
-            pts1,
-            pts2,
-            os.path.join(output_path, f"sift/matches_{i:04d}.png"),
-        )
-
-        # R, T, mask = estimate_pose(l_kpt, r_kpt, K)
-        if R is None or T is None:
-            print(f"[WARN] Frame {i}: pose estimation failed")
-            continue
-        joints_3d = triangulate_joints(l_kpt, r_kpt, K, R, T)
         visualize_3d_joints(
-            joints_3d,
+            mesh_3d,
             R,
             T,
             os.path.join(output_path, f"3d/frame_{i:04d}.png"),
             title=f"Frame {i} - 3D Joints",
         )
-        # 保存交互式3D场景
-        # html_path = os.path.join(output_path, f"scene_{i:04d}.html")
-        # visualize_3d_scene_interactive(joints_3d, R, T, html_path)
 
 
 # ---------- 多人批量处理入口 ----------
 # TODO：这里需要同时加载一个人的四个视频逻辑才行
 # TODO: 这里需要使用rt info里面的外部参数才行
-def process_person_videos(input_path, output_path, rt_info, K):
-    subjects = sorted(glob.glob(f"{input_path}/*/"))
+def process_person_videos(
+    mesh_path: Path, video_path: Path, output_path: Path, rt_info, K
+):
+    subjects = sorted(mesh_path.glob("*/"))
     if not subjects:
-        raise FileNotFoundError(f"No folders found in: {input_path}")
-    print(f"[INFO] Found {len(subjects)} subjects in {input_path}")
+        raise FileNotFoundError(f"No folders found in: {mesh_path}")
+    print(f"[INFO] Found {len(subjects)} subjects in {mesh_path}")
     for person_dir in subjects:
-        person_name = os.path.basename(person_dir.rstrip("/"))
+
+        person_name = person_dir.name
         print(f"\n[INFO] Processing: {person_name}")
 
-        # TODO: 这里预测的代码需要修改一下，统一为一个格式比较好。
-        npz_file = sorted(Path(person_dir).glob("*.npz"))
-        left = npz_file[0]
-        right = npz_file[1]
+        # 不同的环境
+        for environment_dir in person_dir.glob("*/"):
+            print(f"[INFO] Found video in {environment_dir.name}")
 
-        out_dir = Path(output_path) / person_name
+            npz_file = sorted(environment_dir.glob("*/*.npz"))
 
-        process_one_video(left, right, out_dir)
+            mapped_info = {}
 
-@hydra.main(version_base=None, config_path="../configs", config_name="triangulation")
+            out_dir = output_path / person_name / environment_dir.name
+
+            # mapping the npz files to left, right, front
+            for file in npz_file:
+                mapped_info[file.stem] = {
+                    "npz": file,
+                    "video": video_path
+                    / person_name
+                    / environment_dir.name
+                    / f"{file.stem}.mp4",
+                }
+
+            process_one_video(mapped_info, out_dir, rt_info, K)
+
+
+@hydra.main(
+    version_base=None, config_path="../configs", config_name="mesh_triangulation"
+)
 def main(cfg):
 
     # 准备相机外部参数
     camera_position_dict = prepare_camera_position(
-        K=np.array(cfg.camera_K.K),
-        yaws=cfg.camera_position.yaws,
+        K=cfg.camera_K,
         T=cfg.camera_position.T,
-        r=cfg.camera_position.r,
         z=cfg.camera_position.z,
         output_path=cfg.paths.log_path,
         img_size=cfg.camera_K.image_size,
+        dist_front=cfg.camera_position.dist_front,
+        dist_left=cfg.camera_position.dist_left,
+        dist_right=cfg.camera_position.dist_right,
+        baseline=cfg.camera_position.baseline,
     )
 
-    process_person_videos(input_path=cfg.paths.input_path, output_path=cfg.paths.log_path, rt_info=camera_position_dict['rt_info'], K=cfg.camera_K)
+    process_person_videos(
+        mesh_path=Path(cfg.paths.mesh_path),
+        video_path=Path(cfg.paths.video_path),
+        output_path=Path(cfg.paths.log_path),
+        rt_info=camera_position_dict["rt_info"],
+        K=camera_position_dict["K_map"],
+    )
+
 
 if __name__ == "__main__":
 
