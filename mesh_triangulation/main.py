@@ -158,10 +158,6 @@ def process_one_video(environment_dir: dict[str, Path], output_path: Path, rt_in
         environment_dir["right"]
     )
 
-    if left_frames is None or right_frames is None:
-        print(f"[WARN] Missing left or right view data in {environment_dir}")
-        return
-
     # * 确保三视点帧数一致
     if (
         left_frames.shape[0] != right_frames.shape[0]

@@ -74,9 +74,9 @@ def triangulate_with_missing(
     Ps = {}
     Rcs = {}
     tcs = {}
-    # FIXME: 这里有问题
+    
     for v in observations.keys():
-        R_wc, t_wc, C_wc = extrinsics[v]            # world -> cam
+        R_wc, t_wc, C_wc = extrinsics[v].values()           # world -> cam
         K = Ks[v]
         P = build_P(K, R_wc, t_wc)            # x = K [R|t] X_world
         Ps[v] = P
@@ -109,7 +109,7 @@ def triangulate_with_missing(
                 x1 = observations[v1][j][:2].astype(float)
                 x2 = observations[v2][j][:2].astype(float)
 
-                try:
+                try: # FIXME: 这里有问题
                     X = triangulate_two_views(Ps[v1], Ps[v2], x1, x2)  # 世界坐标
                 except cv2.error:
                     continue
