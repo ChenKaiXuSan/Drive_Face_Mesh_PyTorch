@@ -10,7 +10,7 @@
       "name": "prepare_data",
       "type": "debugpy",
       "request": "launch",
-      "module": "prepare_data.main",
+      "module": "prepare_mesh.main",
       "justMyCode": true,
     },
     {

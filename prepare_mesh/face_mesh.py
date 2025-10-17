@@ -39,12 +39,12 @@ CON = mp_face_mesh.FACEMESH_CONTOURS
 
 
 # --- helpers: 坐标&mesh渲染 ---
-def landmarks_to_numpy(face_landmarks_list, image_shape):
+def landmarks_to_numpy(face_landmarks_list):
     """-> np.array (num_faces, 468, 3) in pixel coords"""
-    h, w = image_shape[:2]
+    # * 不normalize，因为之后的图像处理需要像素坐标
     all_faces = []
     for lm in face_landmarks_list:
-        pts = [(p.x * w, p.y * h, p.z) for p in lm.landmark]
+        pts = [(p.x, p.y, p.z) for p in lm.landmark]
         all_faces.append(pts)
     return np.array(all_faces, dtype=np.float32)
 
@@ -250,9 +250,7 @@ def process_video_with_face_mesh(
             # save landmarks to npz
             save_info[str(frame_id)] = {
                 "raw_frame": rgb_frame,
-                "mesh": (
-                    landmarks_to_numpy(landmarks, frame.shape) if landmarks else None
-                ),
+                "mesh": (landmarks_to_numpy(landmarks)) if landmarks is not None else None,
                 "video_info": {
                     "fps": cap.get(cv2.CAP_PROP_FPS),
                     "width": width,

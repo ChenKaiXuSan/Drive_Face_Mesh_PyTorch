@@ -182,9 +182,9 @@ def process_one_video(environment_dir: dict[str, Path], output_path: Path, rt_in
 
     for i in range(min_frames):
 
-        f_mesh = front_frames[i]
-        l_mesh = left_frames[i]
-        r_mesh = right_frames[i]
+        f_mesh = front_mesh[i]
+        l_mesh = left_mesh[i]
+        r_mesh = right_mesh[i]
 
         f_frame = front_frames[i]
         l_frame = left_frames[i]
@@ -192,15 +192,15 @@ def process_one_video(environment_dir: dict[str, Path], output_path: Path, rt_in
 
         # * 确保三视点图像尺寸一致
         if (
-            f_frame.shape[1:3] != l_frame.shape[1:3]
-            or f_frame.shape[1:3] != r_frame.shape[1:3]
-            or l_frame.shape[1:3] != r_frame.shape[1:3]
+            f_frame.shape[0:2] != l_frame.shape[0:2]
+            or f_frame.shape[0:2] != r_frame.shape[0:2]
+            or l_frame.shape[0:2] != r_frame.shape[0:2]
         ):
 
             # 统一目标尺寸（取最大值）
             target_h = max(f_mesh.shape[0], l_mesh.shape[0], r_mesh.shape[0])
             target_w = max(f_mesh.shape[1], l_mesh.shape[1], r_mesh.shape[1])
-            
+
             f_frame_resized, f_mesh_rescaled = resize_frame_and_mesh(
                 f_frame, f_mesh, (target_w, target_h)
             )
@@ -212,9 +212,9 @@ def process_one_video(environment_dir: dict[str, Path], output_path: Path, rt_in
             )
 
         observations = {
-            "front": f_mesh_rescaled[:, :, :2],
-            "left": l_mesh_rescaled[:, :, :2],
-            "right": r_mesh_rescaled[:, :, :2],
+            "front": f_mesh_rescaled[:, :2],
+            "left": l_mesh_rescaled[:, :2],
+            "right": r_mesh_rescaled[:, :2],
         }
 
         mesh_3d = triangulate_with_missing(
@@ -223,6 +223,10 @@ def process_one_video(environment_dir: dict[str, Path], output_path: Path, rt_in
             Ks=K,
             max_err_px=8.0,
         )
+
+        if np.isnan(mesh_3d).all():
+            logger.warning(f"Triangulation failed for frame {i}")
+            continue
 
         visualize_3d_joints(
             mesh_3d,

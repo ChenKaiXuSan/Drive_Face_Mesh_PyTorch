@@ -10,7 +10,7 @@ Comment:
 
 Have a good code time :)
 -----
-Last Modified: Wednesday October 15th 2025 8:47:31 pm
+Last Modified: Thursday October 2nd 2025 8:46:56 pm
 Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.com>
 -----
 Copyright (c) 2025 The University of Tsukuba
@@ -90,12 +90,13 @@ def triangulate_with_missing(
 
     views = list(observations.keys())
 
+    # TODO: 这里应该判断三个视角的哪个可以使用
     for j in range(N):
         # 收集该关键点在各视点的可用观测
         avail = []
         for v in views:
             pt = observations[v][j]
-            if np.all(np.isfinite(pt[:2])):           # 只要 x,y 不是 nan 就算可用
+            if not np.allclose(pt[:2], 0):
                 avail.append(v)
 
         if len(avail) < 2:
