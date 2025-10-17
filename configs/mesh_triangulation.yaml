@@ -80,6 +80,6 @@ COCO_SKELETON:
   - (14, 16),
 
 vis:
-  save_kpts_frames: false
-  save_pose_3d_frames: true
+  save_mesh_frame: true
+  save_mesh_3d: true
   merge_3d_frames_to_video: true

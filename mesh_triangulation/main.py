@@ -30,36 +30,12 @@ from mesh_triangulation.camera_position_mapping import prepare_camera_position
 from mesh_triangulation.load import load_mesh_from_npz
 from mesh_triangulation.multi_triangulation import triangulate_with_missing
 
+# vis
+from mesh_triangulation.vis.frame_visualization import draw_and_save_mesh_from_frame
+from mesh_triangulation.vis.mesh_visualization import visualize_3d_mesh
+from mesh_triangulation.vis.merge_video import merge_frames_to_video
 
 # ---------- 可视化工具 ----------
-def draw_and_save_keypoints_from_frame(
-    frame,
-    keypoints,
-    save_path,
-    color=(0, 255, 0),
-    radius=4,
-    thickness=-1,
-    with_index=True,
-):
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    img = frame.numpy() if isinstance(frame, torch.Tensor) else frame.copy()
-    for i, (x, y) in enumerate(keypoints):
-        if np.isnan(x) or np.isnan(y):
-            continue
-        cv2.circle(img, (int(x), int(y)), radius, color, thickness)
-        if with_index:
-            cv2.putText(
-                img,
-                str(i),
-                (int(x) + 4, int(y) - 4),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.4,
-                (255, 255, 255),
-                1,
-            )
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    cv2.imwrite(save_path, img)
-    print(f"[INFO] Saved image with keypoints to: {save_path}")
 
 
 def draw_camera(ax, R, T, scale=0.1, label="Cam"):
@@ -92,26 +68,6 @@ def draw_camera(ax, R, T, scale=0.1, label="Cam"):
     ax.text(*origin, label, color="black")
 
 
-def visualize_3d_joints(joints_3d, R, T, save_path, title="Triangulated 3D Joints"):
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection="3d")
-    draw_camera(ax, np.eye(3), np.zeros(3), label="Cam1")
-    draw_camera(ax, R, T, label="Cam2")
-
-    ax.scatter(joints_3d[:, 0], joints_3d[:, 2], joints_3d[:, 1], c="blue", s=30)
-    for i, (x, y, z) in enumerate(joints_3d):
-        ax.text(x, z, y, str(i), size=8)
-    ax.set_title(title)
-    ax.set_xlabel("X")
-    ax.set_ylabel("Z")
-    ax.set_zlabel("Y")
-    plt.tight_layout()
-    fig.savefig(save_path, dpi=300)
-    plt.close(fig)
-    print(f"[INFO] Saved: {save_path}")
-
-
 def resize_frame_and_mesh(frame: np.ndarray, mesh: np.ndarray, new_size):
     """
     同时缩放图像 frame 和 mesh 坐标
@@ -122,25 +78,33 @@ def resize_frame_and_mesh(frame: np.ndarray, mesh: np.ndarray, new_size):
     返回:
       frame_resized, mesh_rescaled
     """
-    h, w = frame.shape[:2]
     new_w, new_h = new_size
 
     # 图像缩放
-    frame_resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+    if frame.shape[1] != new_w and frame.shape[0] != new_h:
 
-    # 坐标缩放比例
-    sx, sy = new_w / w, new_h / h
+        frame_resized = cv2.resize(
+            frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR
+        )
+    else:
+        frame_resized = frame.copy()
 
-    # 缩放 mesh 坐标
-    mesh_rescaled = np.asarray(mesh, dtype=np.float32).copy()
-    mesh_rescaled[:, 0] *= sx  # x 方向缩放
-    mesh_rescaled[:, 1] *= sy  # y 方向缩放
-    # z 一般保持不变（除非是相机空间深度）
-    return frame_resized, mesh_rescaled
+    # normalize mesh 坐标
+    if not np.allclose(mesh, 0):
+        mesh_normalized = np.asarray(mesh, dtype=np.float32).copy()
+        mesh_normalized[:, 0] *= new_w
+        mesh_normalized[:, 1] *= new_h  # y 方向缩放
+        # z 一般保持不变（除非是相机空间深度）
+    else:
+        mesh_normalized = mesh.copy()
+
+    return frame_resized, mesh_normalized
 
 
 # ---------- 主处理函数 ----------
-def process_one_video(environment_dir: dict[str, Path], output_path: Path, rt_info, K):
+def process_one_video(
+    environment_dir: dict[str, Path], output_path: Path, rt_info, K, vis
+):
 
     os.makedirs(output_path, exist_ok=True)
 
@@ -182,6 +146,10 @@ def process_one_video(environment_dir: dict[str, Path], output_path: Path, rt_in
 
     for i in range(min_frames):
 
+        # ! debug
+        if i > 30:
+            break
+
         f_mesh = front_mesh[i]
         l_mesh = left_mesh[i]
         r_mesh = right_mesh[i]
@@ -198,50 +166,92 @@ def process_one_video(environment_dir: dict[str, Path], output_path: Path, rt_in
         ):
 
             # 统一目标尺寸（取最大值）
-            target_h = max(f_mesh.shape[0], l_mesh.shape[0], r_mesh.shape[0])
-            target_w = max(f_mesh.shape[1], l_mesh.shape[1], r_mesh.shape[1])
+            target_h = max(f_frame.shape[0], l_frame.shape[0], r_frame.shape[0])
+            target_w = max(f_frame.shape[1], l_frame.shape[1], r_frame.shape[1])
 
-            f_frame_resized, f_mesh_rescaled = resize_frame_and_mesh(
+            f_frame_resized, f_mesh_unnormalized = resize_frame_and_mesh(
                 f_frame, f_mesh, (target_w, target_h)
             )
-            l_frame_resized, l_mesh_rescaled = resize_frame_and_mesh(
+            l_frame_resized, l_mesh_unnormalized = resize_frame_and_mesh(
                 l_frame, l_mesh, (target_w, target_h)
             )
-            r_frame_resized, r_mesh_rescaled = resize_frame_and_mesh(
+            r_frame_resized, r_mesh_unnormalized = resize_frame_and_mesh(
                 r_frame, r_mesh, (target_w, target_h)
             )
+        else:
+            f_frame_resized, f_mesh_unnormalized = f_frame, f_mesh
+            l_frame_resized, l_mesh_unnormalized = l_frame, l_mesh
+            r_frame_resized, r_mesh_unnormalized = r_frame, r_mesh
 
         observations = {
-            "front": f_mesh_rescaled[:, :2],
-            "left": l_mesh_rescaled[:, :2],
-            "right": r_mesh_rescaled[:, :2],
+            "front": f_mesh_unnormalized[:, :2],
+            "left": l_mesh_unnormalized[:, :2],
+            "right": r_mesh_unnormalized[:, :2],
         }
 
         mesh_3d = triangulate_with_missing(
             observations=observations,
             extrinsics=rt_info,
             Ks=K,
-            max_err_px=8.0,
+            max_err_px=800.0,
         )
 
         if np.isnan(mesh_3d).all():
             logger.warning(f"Triangulation failed for frame {i}")
             continue
 
-        visualize_3d_joints(
-            mesh_3d,
-            R,
-            T,
-            os.path.join(output_path, f"3d/frame_{i:04d}.png"),
-            title=f"Frame {i} - 3D Joints",
-        )
+        if vis.save_mesh_frame:
+            draw_and_save_mesh_from_frame(
+                frame=f_frame_resized,
+                mesh=f_mesh_unnormalized,
+                save_path=output_path / "vis" / f"mesh_frames/front/frame_{i:04d}.png",
+                color=(0, 255, 0),
+                radius=2,
+                draw_tesselation=True,
+                draw_contours=True,
+                with_index=False,
+            )
+            draw_and_save_mesh_from_frame(
+                frame=l_frame_resized,
+                mesh=l_mesh_unnormalized,
+                save_path=output_path / "vis" / f"mesh_frames/left/frame_{i:04d}.png",
+                color=(0, 255, 0),
+                radius=2,
+                draw_tesselation=True,
+                draw_contours=True,
+                with_index=False,
+            )
+            draw_and_save_mesh_from_frame(
+                frame=r_frame_resized,
+                mesh=r_mesh_unnormalized,
+                save_path=output_path / "vis" / f"mesh_frames/right/frame_{i:04d}.png",
+                color=(0, 255, 0),
+                radius=2,
+                draw_tesselation=True,
+                draw_contours=True,
+                with_index=False,
+            )
+        if vis.save_mesh_3d and not np.isnan(mesh_3d).all():
+            visualize_3d_mesh(
+                mesh_3d,
+                output_path / "vis" / f"mesh_3D_frames/frame_{i:04d}.png",
+                title=f"Frame {i} - 3D Mesh",
+            )
+
+        # * merge 3d mesh visualization frames to video
+        if vis.merge_3d_frames_to_video:
+            merge_frames_to_video(
+                frame_dir=output_path / "vis" / "mesh_3D_frames",
+                output_video_path=output_path / "vis" / (output_path.stem + ".mp4"),
+                fps=30,
+            )
 
 
 # ---------- 多人批量处理入口 ----------
 # TODO：这里需要同时加载一个人的四个视频逻辑才行
 # TODO: 这里需要使用rt info里面的外部参数才行
 def process_person_videos(
-    mesh_path: Path, video_path: Path, output_path: Path, rt_info, K
+    mesh_path: Path, video_path: Path, output_path: Path, rt_info, K, vis_flag
 ):
     subjects = sorted(mesh_path.glob("*/"))
     if not subjects:
@@ -272,7 +282,7 @@ def process_person_videos(
                     / f"{file.stem}.mp4",
                 }
 
-            process_one_video(mapped_info, out_dir, rt_info, K)
+            process_one_video(mapped_info, out_dir, rt_info, K, vis_flag)
 
 
 @hydra.main(
@@ -299,6 +309,7 @@ def main(cfg):
         output_path=Path(cfg.paths.log_path),
         rt_info=camera_position_dict["rt_info"],
         K=camera_position_dict["K_map"],
+        vis_flag=cfg.vis,
     )
 
 
