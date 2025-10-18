@@ -147,9 +147,8 @@ def process_one_video(
     for i in range(min_frames):
 
         # ! debug
-        if i > 30:
-            break
-
+        # if i > 30:
+        
         f_mesh = front_mesh[i]
         l_mesh = left_mesh[i]
         r_mesh = right_mesh[i]
@@ -238,13 +237,13 @@ def process_one_video(
                 title=f"Frame {i} - 3D Mesh",
             )
 
-        # * merge 3d mesh visualization frames to video
-        if vis.merge_3d_frames_to_video:
-            merge_frames_to_video(
-                frame_dir=output_path / "vis" / "mesh_3D_frames",
-                output_video_path=output_path / "vis" / (output_path.stem + ".mp4"),
-                fps=30,
-            )
+    # * merge 3d mesh visualization frames to video
+    if vis.merge_3d_frames_to_video:
+        merge_frames_to_video(
+            frame_dir=output_path / "vis" / "mesh_3D_frames",
+            output_video_path=output_path / "vis" / (output_path.stem + ".mp4"),
+            fps=30,
+        )
 
 
 # ---------- 多人批量处理入口 ----------

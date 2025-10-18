@@ -5,6 +5,7 @@ Split all video frames into four quadrants and save them in separate folders.
 """
 
 from pathlib import Path
+from tqdm import tqdm
 import cv2
 
 
@@ -77,9 +78,12 @@ def save_frame_to_video(image_path: Path, output_path: Path):
 
 
 def process_videos(data_root: Path, image_output_path: Path, video_output_path: Path):
-    for person_dir in data_root.iterdir():
+
+    for person_dir in tqdm(
+        data_root.iterdir(), desc="Processing person directories", ncols=100
+    ):
         if person_dir.is_dir():
-            for video_file in person_dir.iterdir():
+            for video_file in tqdm(person_dir.iterdir(), desc="Processing video files", ncols=100):
 
                 if video_file.stem.startswith("._"):
                     continue

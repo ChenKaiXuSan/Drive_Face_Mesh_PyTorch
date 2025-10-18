@@ -30,11 +30,13 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 
+from pathlib import Path
+from tqdm import tqdm
+
 from prepare_mesh.face_mesh import (
     process_video_with_face_mesh,
     process_image_with_face_mesh,
 )
-from pathlib import Path
 
 
 def process(path, result_path=None):
@@ -53,11 +55,11 @@ if __name__ == "__main__":
     image_input_dir = Path("/workspace/data/image")
     result_dir = Path("/workspace/data/mesh")
 
-    for one_person in video_input_dir.iterdir():
+    for one_person in tqdm(video_input_dir.iterdir(), desc="Processing person", ncols=100):
         if not one_person.is_dir():
             continue
 
-        for video_dir in one_person.iterdir():
+        for video_dir in tqdm(one_person.iterdir(), desc="Processing one person videos", ncols=100):
             if not video_dir.is_dir():
                 continue
 
