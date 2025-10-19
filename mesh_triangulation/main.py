@@ -12,18 +12,12 @@ import os
 import numpy as np
 import cv2
 from pathlib import Path
-import torch
 
 import logging
 
 logger = logging.getLogger(__name__)
 
 import hydra
-
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
 
 from mesh_triangulation.camera_position_mapping import prepare_camera_position
@@ -35,37 +29,8 @@ from mesh_triangulation.vis.frame_visualization import draw_and_save_mesh_from_f
 from mesh_triangulation.vis.mesh_visualization import visualize_3d_mesh
 from mesh_triangulation.vis.merge_video import merge_frames_to_video
 
-# ---------- 可视化工具 ----------
-
-
-def draw_camera(ax, R, T, scale=0.1, label="Cam"):
-    origin = T.reshape(3)
-    x_axis = R @ np.array([1, 0, 0]) * scale + origin
-    y_axis = R @ np.array([0, 1, 0]) * scale + origin
-    z_axis = R @ np.array([0, 0, 1]) * scale + origin
-    view_dir = R @ np.array([0, 0, -1]) * scale * 1.5 + origin  # 摄像头朝向（-Z轴）
-
-    ax.plot(
-        [origin[0], x_axis[0]], [origin[1], x_axis[1]], [origin[2], x_axis[2]], c="r"
-    )
-    ax.plot(
-        [origin[0], y_axis[0]], [origin[1], y_axis[1]], [origin[2], y_axis[2]], c="g"
-    )
-    ax.plot(
-        [origin[0], z_axis[0]], [origin[1], z_axis[1]], [origin[2], z_axis[2]], c="b"
-    )
-
-    # 视线方向箭头（黑色）
-    ax.plot(
-        [origin[0], view_dir[0]],
-        [origin[1], view_dir[1]],
-        [origin[2], view_dir[2]],
-        c="k",
-        linestyle="--",
-    )
-
-    # 相机标签
-    ax.text(*origin, label, color="black")
+# save
+from mesh_triangulation.save import save_3d_joints
 
 
 def resize_frame_and_mesh(frame: np.ndarray, mesh: np.ndarray, new_size):
@@ -148,7 +113,7 @@ def process_one_video(
 
         # ! debug
         # if i > 30:
-        
+
         f_mesh = front_mesh[i]
         l_mesh = left_mesh[i]
         r_mesh = right_mesh[i]
@@ -230,7 +195,26 @@ def process_one_video(
                 draw_contours=True,
                 with_index=False,
             )
+
         if vis.save_mesh_3d and not np.isnan(mesh_3d).all():
+            save_3d_joints(
+                mesh_3d=mesh_3d,
+                save_dir=output_path / "3d_joints",
+                frame_idx=i,
+                rt_info=rt_info,
+                k=K,
+                video_path={
+                    "front": str(environment_dir["front"]['video']),
+                    "left": str(environment_dir["left"]['video']),
+                    "right": str(environment_dir["right"]['video']),
+                },
+                npz_path={
+                    "front": str(environment_dir["front"]['npz']),
+                    "left": str(environment_dir["left"]['npz']),
+                    "right": str(environment_dir["right"]['npz']),
+                },
+            )
+
             visualize_3d_mesh(
                 mesh_3d,
                 output_path / "vis" / f"mesh_3D_frames/frame_{i:04d}.png",
@@ -247,8 +231,6 @@ def process_one_video(
 
 
 # ---------- 多人批量处理入口 ----------
-# TODO：这里需要同时加载一个人的四个视频逻辑才行
-# TODO: 这里需要使用rt info里面的外部参数才行
 def process_person_videos(
     mesh_path: Path, video_path: Path, output_path: Path, rt_info, K, vis_flag
 ):
