@@ -11,14 +11,19 @@ Last Modified: August 4th, 2025
 import os
 import numpy as np
 import cv2
+import logging
+import hydra
+import traceback
+
+import multiprocessing as mp
 from pathlib import Path
 
-import logging
-
+logging.basicConfig(
+    format="[%(asctime)s] [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.INFO,
+)
 logger = logging.getLogger(__name__)
-
-import hydra
-
 
 from mesh_triangulation.camera_position_mapping import prepare_camera_position
 from mesh_triangulation.load import load_mesh_from_npz
@@ -77,7 +82,7 @@ def process_one_video(
         environment_dir["front"]
     )
     if front_frames is None:
-        print(f"[WARN] No front view data found in {environment_dir['front']}")
+        logger.warning(f"No front view data found in {environment_dir['front']}")
         return
 
     left_frames, left_mesh, left_video_info = load_mesh_from_npz(
@@ -204,14 +209,14 @@ def process_one_video(
                 rt_info=rt_info,
                 k=K,
                 video_path={
-                    "front": str(environment_dir["front"]['video']),
-                    "left": str(environment_dir["left"]['video']),
-                    "right": str(environment_dir["right"]['video']),
+                    "front": str(environment_dir["front"]["video"]),
+                    "left": str(environment_dir["left"]["video"]),
+                    "right": str(environment_dir["right"]["video"]),
                 },
                 npz_path={
-                    "front": str(environment_dir["front"]['npz']),
-                    "left": str(environment_dir["left"]['npz']),
-                    "right": str(environment_dir["right"]['npz']),
+                    "front": str(environment_dir["front"]["npz"]),
+                    "left": str(environment_dir["left"]["npz"]),
+                    "right": str(environment_dir["right"]["npz"]),
                 },
             )
 
@@ -230,40 +235,115 @@ def process_one_video(
         )
 
 
+# ---- 子进程全局缓存（由 initializer 注入一次）----
+_G = {
+    "rt_info": None,
+    "K": None,
+    "vis": None,
+    "video_base": None,
+    "output_base": None,
+}
+
+
+def _worker_init(rt_info, K, vis_flag, video_base: Path, output_base: Path):
+    # 限制每个子进程里 BLAS / OpenCV 的线程数，避免过度并行
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+    os.environ.setdefault("MKL_NUM_THREADS", "1")
+    os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+    try:
+        cv2.setNumThreads(1)
+    except Exception:
+        pass
+
+    _G["rt_info"] = rt_info
+    _G["K"] = K
+    _G["vis"] = vis_flag
+    _G["video_base"] = Path(video_base)
+    _G["output_base"] = Path(output_base)
+
+
+def _run_env_task(task):
+    """
+    task: (env_dir: Path, person_name: str)
+    使用全局 _G 里的 rt_info/K/vis/video/output。
+    """
+    env_dir, person_name = task
+    env_dir = Path(env_dir)
+    env_name = env_dir.name
+
+    try:
+        logger.info(f"[TASK] {person_name}/{env_name}")
+        npz_files = sorted(env_dir.glob("*/*.npz"))
+        if not npz_files:
+            return (person_name, env_name, False, "No .npz files")
+
+        # 映射 front/left/right
+        mapped_info = {}
+        for f in npz_files:
+            stem = f.stem  # 约定 stem == front/left/right
+            mapped_info[stem] = {
+                "npz": f,
+                "video": _G["video_base"] / person_name / env_name / f"{stem}.mp4",
+            }
+
+        out_dir = _G["output_base"] / person_name / env_name
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # 你的原函数：使用 _G 中的参数
+        process_one_video(mapped_info, out_dir, _G["rt_info"], _G["K"], _G["vis"])
+        return (person_name, env_name, True, "OK")
+    except Exception as e:
+        tb = traceback.format_exc(limit=10)
+        return (person_name, env_name, False, f"{e}\n{tb}")
+
+
 # ---------- 多人批量处理入口 ----------
 def process_person_videos(
     mesh_path: Path, video_path: Path, output_path: Path, rt_info, K, vis_flag
 ):
-    subjects = sorted(mesh_path.glob("*/"))
+    subjects = sorted(Path(mesh_path).glob("*/"))
     if not subjects:
         raise FileNotFoundError(f"No folders found in: {mesh_path}")
-    print(f"[INFO] Found {len(subjects)} subjects in {mesh_path}")
+    logger.info(f"Found {len(subjects)} subjects in {mesh_path}")
+
+    # 收集所有 environment 任务（跨所有 person）
+    tasks = []
     for person_dir in subjects:
-
         person_name = person_dir.name
-        print(f"\n[INFO] Processing: {person_name}")
+        logger.info(f"Processing: {person_name}")
+        envs = sorted(person_dir.glob("*/"))
+        if not envs:
+            logger.warning(f"[WARN] No environments found for {person_name}")
+            continue
+        for env_dir in envs:
+            tasks.append((env_dir, person_name))
 
-        # 不同的环境
-        for environment_dir in person_dir.glob("*/"):
-            print(f"[INFO] Found video in {environment_dir.name}")
+    if not tasks:
+        logger.warning("[WARN] No environment tasks found.")
+        return
 
-            npz_file = sorted(environment_dir.glob("*/*.npz"))
+    # 并发度：默认 CPU 一半；IO/SSD 强时可适当调高
+    processes = max(1, (os.cpu_count() or 4))
+    chunksize = 2  # 小任务可调大，减少调度开销
+    maxtasksperchild = 40  # 长跑更稳，防内存涨
 
-            mapped_info = {}
+    logger.info(f"[POOL] tasks={len(tasks)} procs={processes} chunksize={chunksize}")
 
-            out_dir = output_path / person_name / environment_dir.name
-
-            # mapping the npz files to left, right, front
-            for file in npz_file:
-                mapped_info[file.stem] = {
-                    "npz": file,
-                    "video": video_path
-                    / person_name
-                    / environment_dir.name
-                    / f"{file.stem}.mp4",
-                }
-
-            process_one_video(mapped_info, out_dir, rt_info, K, vis_flag)
+    ctx = mp.get_context("spawn")  # 跨平台稳
+    with ctx.Pool(
+        processes=processes,
+        initializer=_worker_init,
+        initargs=(rt_info, K, vis_flag, Path(video_path), Path(output_path)),
+        maxtasksperchild=maxtasksperchild,
+    ) as pool:
+        for person, env, ok, msg in pool.imap_unordered(
+            _run_env_task, tasks, chunksize
+        ):
+            if ok:
+                logger.info(f"[OK]   {person}/{env} -> {msg}")
+            else:
+                logger.error(f"[FAIL] {person}/{env} -> {msg}")
 
 
 @hydra.main(

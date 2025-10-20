@@ -3,12 +3,10 @@
 
 from __future__ import annotations
 
-import os
 import math
 from dataclasses import dataclass
 from typing import Dict, Tuple, Optional, Iterable, Union, Any
 import numpy as np
-import matplotlib.pyplot as plt
 from pathlib import Path
 
 from mesh_triangulation.vis.camera_position_visualization import (

@@ -21,10 +21,10 @@ Date      	By	Comments
 """
 import logging
 
-logger = logging.getLogger(__name__)
 import numpy as np
-from torchvision.io import read_video
 from pathlib import Path
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def load_mesh_from_npz(file_info: dict[str, Path]):

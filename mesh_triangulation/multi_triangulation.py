@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
-'''
+"""
 File: /workspace/code/mesh_triangulation/multi_triangulation.py
 Project: /workspace/code/mesh_triangulation
 Created Date: Wednesday October 15th 2025
@@ -10,7 +10,7 @@ Comment:
 
 Have a good code time :)
 -----
-Last Modified: Thursday October 2nd 2025 8:46:56 pm
+Last Modified: Saturday October 18th 2025 9:54:38 am
 Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.com>
 -----
 Copyright (c) 2025 The University of Tsukuba
@@ -18,37 +18,47 @@ Copyright (c) 2025 The University of Tsukuba
 HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
-'''
+"""
+from typing import Dict, List, Tuple
 import numpy as np
 import cv2
-from typing import Dict, List, Tuple
+
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 # --------- 工具函数 ---------
 def build_P(K: np.ndarray, R: np.ndarray, t: np.ndarray) -> np.ndarray:
     """K(3x3), R(3x3), t(3,) -> P(3x4)"""
-    return K @ np.hstack([R, t.reshape(3,1)])
+    return K @ np.hstack([R, t.reshape(3, 1)])
 
-def triangulate_two_views(P1: np.ndarray, P2: np.ndarray,
-                          x1: np.ndarray, x2: np.ndarray) -> np.ndarray:
+
+def triangulate_two_views(
+    P1: np.ndarray, P2: np.ndarray, x1: np.ndarray, x2: np.ndarray
+) -> np.ndarray:
     """两视点线性三角测量，x1/x2: (2,) 像素坐标 → 返回 X(3,) 齐次归一化"""
     # OpenCV 需要 (2, N)
-    X_h = cv2.triangulatePoints(P1, P2, x1.reshape(2,1), x2.reshape(2,1))
+    X_h = cv2.triangulatePoints(P1, P2, x1.reshape(2, 1), x2.reshape(2, 1))
     X = (X_h[:3] / X_h[3]).reshape(3)
     return X
+
 
 def project(P: np.ndarray, X: np.ndarray) -> np.ndarray:
     """3D 点投影到像素 (2,)"""
     X_h = np.hstack([X, 1.0])
     x = P @ X_h
-    return (x[:2] / x[2])
+    return x[:2] / x[2]
+
 
 def cheirality_ok(R: np.ndarray, t: np.ndarray, X: np.ndarray) -> bool:
     """正深度检查：点在相机前方（z_cam>0）"""
     X_cam = R @ X + t
     return X_cam[2] > 0
 
-def reproj_error(Ps: List[np.ndarray], X: np.ndarray,
-                 xs: List[np.ndarray]) -> float:
+
+def reproj_error(Ps: List[np.ndarray], X: np.ndarray, xs: List[np.ndarray]) -> float:
     """平均重投影误差（像素）"""
     errs = []
     for P, x in zip(Ps, xs):
@@ -56,13 +66,16 @@ def reproj_error(Ps: List[np.ndarray], X: np.ndarray,
         errs.append(np.linalg.norm(x_hat - x))
     return float(np.mean(errs)) if errs else np.inf
 
+
 # --------- 主函数 ---------
 def triangulate_with_missing(
     observations: Dict[str, np.ndarray],
     # observations[view] = (N,2) 或 (N,3) (第三维可做置信度)，缺失用 np.nan
     Ks: Dict[str, np.ndarray],
-    extrinsics: Dict[str, Tuple[np.ndarray, np.ndarray]],  # {view: (R_wc, t_wc)} 使得 X_cam = R_wc X_w + t_wc
-    max_err_px: float = 5.0
+    extrinsics: Dict[
+        str, Tuple[np.ndarray, np.ndarray]
+    ],  # {view: (R_wc, t_wc)} 使得 X_cam = R_wc X_w + t_wc
+    max_err_px: float = 5.0,
 ) -> np.ndarray:
     """
     对每个关键点自动选择可用视点对进行三角测量并返回世界坐标 (N,3)，不可测设为 NaN。
@@ -74,11 +87,11 @@ def triangulate_with_missing(
     Ps = {}
     Rcs = {}
     tcs = {}
-    
+
     for v in observations.keys():
-        R_wc, t_wc, C_wc = extrinsics[v].values()           # world -> cam
+        R_wc, t_wc, C_wc = extrinsics[v].values()  # world -> cam
         K = Ks[v]
-        P = build_P(K, R_wc, t_wc)            # x = K [R|t] X_world
+        P = build_P(K, R_wc, t_wc)  # x = K [R|t] X_world
         Ps[v] = P
         Rcs[v], tcs[v] = R_wc, t_wc.reshape(3)
 
@@ -105,19 +118,21 @@ def triangulate_with_missing(
         # 枚举所有视点对，选择最优
         best = {"err": np.inf, "X": None}
         for i in range(len(avail)):
-            for k in range(i+1, len(avail)):
+            for k in range(i + 1, len(avail)):
                 v1, v2 = avail[i], avail[k]
                 x1 = observations[v1][j][:2].astype(float)
                 x2 = observations[v2][j][:2].astype(float)
 
-                try: # FIXME: 这里有问题
+                try:  # FIXME: 这里有问题
                     X = triangulate_two_views(Ps[v1], Ps[v2], x1, x2)  # 世界坐标
                 except cv2.error:
                     continue
 
                 # 正深度检查（两个相机前方）
-                if not (cheirality_ok(Rcs[v1], tcs[v1], X) and
-                        cheirality_ok(Rcs[v2], tcs[v2], X)):
+                if not (
+                    cheirality_ok(Rcs[v1], tcs[v1], X)
+                    and cheirality_ok(Rcs[v2], tcs[v2], X)
+                ):
                     continue
 
                 # 用所有可用视点计算平均重投影误差
@@ -134,7 +149,6 @@ def triangulate_with_missing(
         # 否则保持 NaN（不可用/不可靠）
 
     return X_world
-
 
 
 # ---------- 三角测量 ----------
