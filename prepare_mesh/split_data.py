@@ -105,6 +105,7 @@ def process_videos(data_root: Path, image_output_path: Path, video_output_path: 
 
 
 if __name__ == "__main__":
+    # TODO: 不通过图片中转，直接从视频划分并保存视频，这样节省存储空间
     root_path = Path("/workspace/data/raw")
     img_output_path = Path("/workspace/data/image")
     video_output_path = Path("/workspace/data/videos")

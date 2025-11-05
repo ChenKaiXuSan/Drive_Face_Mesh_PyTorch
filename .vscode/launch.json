@@ -7,7 +7,7 @@
       "module": "enter-your-module-name"
     },
     {
-      "name": "prepare_data",
+      "name": "prepare_mesh_2d",
       "type": "debugpy",
       "request": "launch",
       "module": "prepare_mesh.main",
@@ -20,7 +20,7 @@
       "module": "camera_calibration.main",
     },
     {
-      "name": "mesh_triangulation",
+      "name": "prepare_mesh_3d",
       "type": "debugpy",
       "request": "launch",
       "module": "mesh_triangulation.main",

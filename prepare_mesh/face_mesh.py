@@ -195,6 +195,7 @@ def process_video_with_face_mesh(
     if not cap.isOpened():
         raise IOError(f"Failed to open video: {video_path}")
 
+    # prepare directories and video writer
     writer_video = None
     if output_path:
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
