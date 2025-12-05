@@ -1,240 +1,287 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
 """
-File: /workspace/code/triangulation/vis/pose_visualization.py
-Project: /workspace/code/triangulation/vis
-Created Date: Tuesday October 14th 2025
-Author: Kaixu Chen
------
-Comment:
-
-Have a good code time :)
------
-Last Modified: Tuesday October 14th 2025 10:55:01 am
-Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.com>
------
-Copyright (c) 2025 The University of Tsukuba
------
-HISTORY:
-Date      	By	Comments
-----------	---	---------------------------------------------------------
+pose_visualization.py (refactored+optimized)
+--------------------------------
+3D Mesh 与相机位姿可视化工具（解耦 & 稳健版）
+- 支持多相机绘制与多视角导出
+- 使用 Line3DCollection 加速连线
+- 自动等比例边界
+- NaN过滤、安全索引
+- 支持颜色映射、索引、Y轴翻转
+- 可选导出 default/front/left/right 四个视角
+--------------------------------
 """
-from typing import Iterable, List, Optional, Sequence, Tuple, Union, Dict
 
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 from pathlib import Path
 import logging
-
-logger = logging.getLogger(__name__)
-
 import numpy as np
-
 import matplotlib.pyplot as plt
-
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
 import mediapipe as mp
 
-# MediaPipe 的连接表（tesselation + 轮廓）
+logger = logging.getLogger(__name__)
 mp_face_mesh = mp.solutions.face_mesh
-TES = mp_face_mesh.FACEMESH_TESSELATION
-CON = mp_face_mesh.FACEMESH_CONTOURS
+TES = np.array(list(mp_face_mesh.FACEMESH_TESSELATION))
+CON = np.array(list(mp_face_mesh.FACEMESH_CONTOURS))
 
-# ---- 新增：骨长计算 ----
+# ================= Helper Functions =================
 
 
-def compute_bone_lengths(
-    pts: np.ndarray,
-    skeleton: Iterable[Tuple[int, int]],
-    *,
-    ignore_nan: bool = True,
-) -> np.ndarray:
-    """
-    计算一帧 3D 关键点在给定骨架下的骨长。
-    pts: (K,3)
-    返回: (E,) 对应 skeleton 中每条边的长度；无效边为 np.nan
-    """
-    P = np.asarray(pts, dtype=float)
-    L: List[float] = []
-    for i, j in skeleton:
-        if i >= len(P) or j >= len(P):
-            L.append(np.nan)
+def _calc_view_from_point(
+    target: np.ndarray, cam_pos: np.ndarray
+) -> Tuple[float, float]:
+    v = np.asarray(cam_pos, float).reshape(3) - np.asarray(target, float).reshape(3)
+    vx, vy, vz = v[0], v[1], v[2]
+    if np.allclose([vx, vy, vz], 0, atol=1e-12):
+        return 20.0, -60.0
+    azim = float(np.degrees(np.arctan2(vy, vx)))
+    elev = float(np.degrees(np.arctan2(vz, np.hypot(vx, vy))))
+    return elev, azim
+
+
+def _gather_cam_centers(rt_info: Optional[Dict[str, Any]]) -> Dict[str, np.ndarray]:
+    centers = {}
+    if not rt_info:
+        return centers
+    for name, ext in rt_info.items():
+        try:
+            R_wc = np.asarray(ext["R"], float).reshape(3, 3)
+            t_wc = np.asarray(ext["t"], float).reshape(3)
+            Cw = -R_wc.T @ t_wc
+            centers[str(name)] = Cw
+        except Exception:
             continue
-        a, b = P[i], P[j]
-        if ignore_nan and (not np.all(np.isfinite(a)) or not np.all(np.isfinite(b))):
-            L.append(np.nan)
-            continue
-        L.append(float(np.linalg.norm(a - b)))
-    return np.asarray(L, dtype=float)
+    return centers
 
 
-def compute_bone_stats(lengths: np.ndarray) -> Dict[str, float]:
-    """
-    对骨长（含 nan）做统计，返回 mean/median/std/min/max/valid_count。
-    """
-    x = np.asarray(lengths, dtype=float)
-    valid = np.isfinite(x)
-    if not np.any(valid):
-        return dict(
-            mean=np.nan,
-            median=np.nan,
-            std=np.nan,
-            min=np.nan,
-            max=np.nan,
-            valid_count=0,
-        )
-    xv = x[valid]
-    return dict(
-        mean=float(np.nanmean(xv)),
-        median=float(np.nanmedian(xv)),
-        std=float(np.nanstd(xv)),
-        min=float(np.nanmin(xv)),
-        max=float(np.nanmax(xv)),
-        valid_count=int(valid.sum()),
-    )
+def _save_views(
+    fig: plt.Figure,
+    ax: plt.Axes,
+    base_path: Path,
+    look_at: np.ndarray,
+    cam_centers: Dict[str, np.ndarray],
+    default_elev_azim: Tuple[float, float],
+    tags: List[str],
+    dpi: int = 220,
+) -> Dict[str, Path]:
+    out_paths: Dict[str, Path] = {}
+    base_path = Path(base_path)
+    stem = base_path.stem
+    parent = base_path.parent
+    parent.mkdir(parents=True, exist_ok=True)
+
+    for tag in tags:
+        if tag == "default":
+            elev, azim = default_elev_azim
+        else:
+            if tag not in cam_centers:
+                continue
+            elev, azim = _calc_view_from_point(look_at, cam_centers[tag])
+        ax.view_init(elev=elev, azim=azim)
+        p = parent / f"{stem}_{tag}.png"
+        fig.savefig(p, dpi=dpi, bbox_inches="tight")
+        out_paths[tag] = p
+    return out_paths
+
+
+def _save_mesh_views(fig, ax, base_path, default_elev_azim, dpi=220):
+    # 以人脸朝向为准，保存预设视角
+    # 前：人脸面向相机
+    presets = {
+        "default": default_elev_azim,
+        "left": (0.0, 180.0),
+        "front": (0.0, 90.0),
+        "back": (0.0, -90.0),
+        "top": (90.0, 0.0),
+        "bottom": (-90.0, 0.0),
+    }
+
+    out = {}
+    base_path = Path(base_path)
+    stem, parent = base_path.stem, base_path.parent
+    for tag in presets:
+        save_path = parent / tag / f"{stem}_.png"
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        elev, azim = presets[tag]
+        ax.view_init(elev=elev, azim=azim)
+        fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
+        out[tag] = save_path
+    return out
+
+
+# ================= Core Drawing =================
 
 
 def draw_camera(
     ax: plt.Axes,
-    rt_info: Union[Dict[str, np.ndarray], Tuple[np.ndarray, np.ndarray]],
-    K: np.ndarray,  # (3,3)
-    image_size: Tuple[int, int],  # (W, H) in px
-    axis_len: float = 1.0,
-    frustum_depth: float = 1.0,
-    colors: Tuple[str, str, str] = ("r", "g", "b"),
+    R_wc: np.ndarray,
+    t_wc: np.ndarray,
+    K: Optional[np.ndarray] = None,
+    image_size: Optional[Tuple[int, int]] = None,
+    axis_len: float = 0.05,
+    frustum_depth: float = 0.1,
+    color_axes: Tuple[str, str, str] = ("r", "g", "b"),
+    frustum_alpha: float = 0.4,
     label: Optional[str] = None,
-    convention: str = "cam2world",  # or "cam2world"
-    ray_scale_mode: str = "depth",  # "depth" or "focal"
-    linewidths: Optional[Dict[str, float]] = None,
-    frustum_alpha: float = 1.0,
+    invK: Optional[np.ndarray] = None,
 ) -> np.ndarray:
-    """
-    在 Matplotlib 3D 轴上绘制 OpenCV 相机坐标系与视锥体。
+    R_wc = np.asarray(R_wc, float).reshape(3, 3)
+    t_wc = np.asarray(t_wc, float).reshape(3)
+    Cw = -R_wc.T @ t_wc
 
-    坐标系对应：
-      OpenCV: x→右, y→下, z→前
-      Matplotlib: x→右, y→前, z→上
-
-    返回:
-        C_plt: (3,) 相机中心在 Matplotlib 世界坐标中的位置
-    """
-    # ---------------- 参数准备 ----------------
-    if linewidths is None:
-        linewidths = {"axis": 1.0, "frustum": 0.5}
-
-    R, T, C = rt_info["R"], rt_info["t"], rt_info["C"]
-    K = np.asarray(K, float).reshape(3, 3)
-    W, H = [float(v) for v in image_size]
-
-    # ---------------- 相机中心计算 ----------------
-    # Xc = R Xw + T → C = -R^T T
-    R_wc = R
-    C_world = -R.T @ T
-
-    C_plt = C_world.ravel()
-
-    # ---------------- 绘制相机坐标轴 ----------------
-    for axis_vec, color in zip(R_wc, colors):  # R_wc 的行向量即各相机轴方向
-        end_cv = axis_vec * axis_len
-        end_plt = end_cv
+    for vec, col in zip(R_wc, color_axes):
         ax.plot(
-            [C_plt[0], C_plt[0] + end_plt[0]],
-            [C_plt[1], C_plt[1] + end_plt[1]],
-            [C_plt[2], C_plt[2] + end_plt[2]],
-            c=color,
-            lw=linewidths["axis"],
+            [Cw[0], Cw[0] + vec[0] * axis_len],
+            [Cw[1], Cw[1] + vec[1] * axis_len],
+            [Cw[2], Cw[2] + vec[2] * axis_len],
+            c=col,
+            lw=1.2,
         )
 
-    # ---------------- 计算视锥体四个角点 ----------------
-    corners_px = np.array(
-        [
-            [0, 0, 1],
-            [W - 1, 0, 1],
-            [W - 1, H - 1, 1],
-            [0, H - 1, 1],
-        ],
-        dtype=float,
-    )
-    rays_cam = np.linalg.inv(K) @ corners_px.T  # (3,4)
+    if (K is not None or invK is not None) and image_size is not None:
+        if invK is None:
+            invK = np.linalg.inv(np.asarray(K, float).reshape(3, 3))
+        W, H = map(float, image_size)
+        corners_px = np.array([[0, 0, 1], [W, 0, 1], [W, H, 1], [0, H, 1]], float).T
+        rays = invK @ corners_px
+        scale = frustum_depth / np.clip(rays[2, :], 1e-6, None)
+        rays *= scale
+        corners_w = (R_wc.T @ rays).T + Cw  # 正确：cam→world
 
-    if ray_scale_mode == "depth":
-        scale = frustum_depth / np.clip(rays_cam[2, :], 1e-9, None)
-        rays_cam = rays_cam * scale
-    else:
-        fx, fy = K[0, 0], K[1, 1]
-        s = max(axis_len, frustum_depth) / max((fx + fy) / 2, 1e-6)
-        rays_cam *= s
-
-    # cam→world(OpenCV)
-    corners_world_cv = (R_wc @ rays_cam).T + C_world.reshape(1, 3)
-    # world(OpenCV) → Matplotlib
-    corners_world_plt = corners_world_cv
-
-    # ---------------- 绘制视锥体边缘 ----------------
-    for p in corners_world_plt:
+        for p in corners_w:
+            ax.plot(
+                [Cw[0], p[0]],
+                [Cw[1], p[1]],
+                [Cw[2], p[2]],
+                c="k",
+                lw=0.6,
+                alpha=frustum_alpha,
+            )
+        loop = [0, 1, 2, 3, 0]
         ax.plot(
-            [C_plt[0], p[0]],
-            [C_plt[1], p[1]],
-            [C_plt[2], p[2]],
+            corners_w[loop, 0],
+            corners_w[loop, 1],
+            corners_w[loop, 2],
             c="k",
-            lw=linewidths["frustum"],
+            lw=0.6,
             alpha=frustum_alpha,
         )
 
-    loop = [0, 1, 2, 3, 0]
-    ax.plot(
-        corners_world_plt[loop, 0],
-        corners_world_plt[loop, 1],
-        corners_world_plt[loop, 2],
-        c="k",
-        lw=linewidths["frustum"],
-        alpha=frustum_alpha,
-    )
-
-    # ---------------- 标签 ----------------
     if label:
-        ax.text(C_plt[0], C_plt[1], C_plt[2], label, color="black", fontsize=9)
+        ax.text(Cw[0], Cw[1], Cw[2], label, fontsize=8, color="k")
+    return Cw
 
-    return C_plt
+
+# ================= Main Visualization =================
 
 
 def visualize_3d_mesh(
     mesh_3d: np.ndarray,
     save_path: Path,
-    title="Triangulated 3D Mesh",
-):
-
+    title: str = "Triangulated 3D Mesh",
+    rt_info: Optional[Dict[str, Any]] = None,
+    K: Optional[Dict[str, np.ndarray]] = None,
+    image_size: Optional[Tuple[int, int]] = None,
+    point_size: int = 8,
+    color_points: Union[str, np.ndarray] = "dodgerblue",
+    draw_tessellation: bool = True,
+    draw_contours: bool = False,
+    show_indices: bool = False,
+    invert_y: bool = False,
+    dpi: int = 220,
+    save_views: Optional[List[str]] = None,
+    default_view: Tuple[float, float] = (20.0, -60.0),
+) -> Dict[str, Path]:
+    save_path = Path(save_path)
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
-    fig = plt.figure()
+    if mesh_3d.ndim != 2 or mesh_3d.shape[1] != 3:
+        raise ValueError(f"mesh_3d 应为 (N,3)，得到 {mesh_3d.shape}")
+
+    mesh = np.asarray(mesh_3d, float)
+    if not np.isfinite(mesh).all():
+        mask = np.isfinite(mesh).all(axis=1)
+        mesh = mesh[mask]
+        logger.warning("Mesh 含 NaN，已过滤失效点。")
+
+    if invert_y:
+        mesh = mesh.copy()
+        mesh[:, 1] *= -1.0
+
+    if (
+        isinstance(color_points, np.ndarray)
+        and color_points.ndim == 1
+        and color_points.shape[0] == mesh.shape[0]
+    ):
+        vals = color_points.astype(float)
+        vmin, vmax = np.nanpercentile(vals, [2, 98])
+        vals = np.clip((vals - vmin) / max(vmax - vmin, 1e-9), 0, 1)
+        cmap = plt.get_cmap("viridis")
+        colors = cmap(vals)
+    else:
+        colors = color_points
+
+    invK_map = {
+        name: np.linalg.inv(Km) for name, Km in (K or {}).items() if Km is not None
+    }
+
+    fig = plt.figure(figsize=(6, 6))
     ax = fig.add_subplot(111, projection="3d")
-
-    xlab, ylab, zlab = "X", "Z", "Y (up)"
-
-    # 点与索引
-    mesh_3d[:, 1] = -mesh_3d[:, 1]  # 反转Y轴以符合Y朝上习惯
-    ax.scatter(mesh_3d[:, 0], mesh_3d[:, 1], mesh_3d[:, 2], c="blue", s=30)
-
-    for i, (x, y, z) in enumerate(mesh_3d):
-        ax.text(x, y, z, str(i), size=8)
-
-    # mesh连接骨架
-    for a, b in TES:
-        pa, pb = mesh_3d[a], mesh_3d[b]
-        ax.plot(
-            [pa[0], pb[0]],
-            [pa[1], pb[1]],
-            [pa[2], pb[2]],
-            c="gray",
-            linewidth=0.5,
-        )
-
-    plt.tight_layout()
-
     ax.set_title(title)
-    ax.set_xlabel(xlab)
-    ax.set_ylabel(ylab)
-    ax.set_zlabel(zlab)
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z (up)")
 
-    plt.tight_layout()
+    ax.scatter(
+        mesh[:, 0], mesh[:, 1], mesh[:, 2], c=colors, s=point_size, depthshade=True
+    )
 
-    fig.savefig(str(save_path))
+    segs = []
+    if draw_tessellation:
+        idx_ok = (TES[:, 0] < len(mesh)) & (TES[:, 1] < len(mesh))
+        if np.any(idx_ok):
+            segs.append(np.stack([mesh[TES[idx_ok, 0]], mesh[TES[idx_ok, 1]]], axis=1))
+    if draw_contours:
+        idx_ok = (CON[:, 0] < len(mesh)) & (CON[:, 1] < len(mesh))
+        if np.any(idx_ok):
+            segs.append(np.stack([mesh[CON[idx_ok, 0]], mesh[CON[idx_ok, 1]]], axis=1))
+    if len(segs) > 0:
+        segs = np.concatenate(segs, axis=0)
+        lc = Line3DCollection(segs, colors="gray", linewidths=0.3, alpha=0.6)
+        ax.add_collection3d(lc)
+
+    if show_indices and len(mesh) <= 600:
+        for i, (x, y, z) in enumerate(mesh):
+            ax.text(x, y, z, str(i), size=7, color="k")
+
+    if rt_info:
+        for name, ext in rt_info.items():
+            draw_camera(
+                ax,
+                ext["R"],
+                ext["t"],
+                K=(K or {}).get(name),
+                image_size=image_size,
+                axis_len=0.08,
+                frustum_depth=0.25,
+                label=str(name),
+                invK=invK_map.get(name),
+            )
+
+    out_paths: Dict[str, Path] = {"main": save_path}
+
+    if save_views:
+        extras = _save_mesh_views(
+            fig=fig,
+            ax=ax,
+            base_path=save_path,
+            default_elev_azim=default_view,
+            dpi=dpi,
+        )
+        out_paths.update(extras)
+
     plt.close(fig)
-    logger.info(f"Saved 3D mesh visualization to {save_path}")
+    logger.info(f"Saved 3D mesh visualization → {save_path}")
+    return out_paths

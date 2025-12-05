@@ -23,6 +23,7 @@ import logging
 
 import numpy as np
 from pathlib import Path
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -37,16 +38,23 @@ def load_mesh_from_npz(file_info: dict[str, Path]):
 
     data = np.load(npz_path, allow_pickle=True)
 
+    not_mesh_list = []
+
     # unpack the npz
     for frame_num, info in data.items():
 
         _one_frame_info = info.item()
 
         raw_frame[frame_num] = _one_frame_info["raw_frame"]
+
+        # check none mesh index
+        if _one_frame_info["mesh"] is None:
+            not_mesh_list.append(frame_num)
+
         mesh[frame_num] = (
             _one_frame_info["mesh"]
             if _one_frame_info["mesh"] is not None
-            else np.zeros((1, 478, 3))
+            else np.full((1, 478, 3), np.nan)
         )
         video_info = _one_frame_info["video_info"]
         video_path = _one_frame_info["video_path"]
@@ -63,4 +71,8 @@ def load_mesh_from_npz(file_info: dict[str, Path]):
     assert raw_frame.shape[0] == mesh.shape[0]
     assert video_info is not None and video_path is not None
 
-    return raw_frame, mesh, video_info
+    # logger.info(
+    #     f"Raw frame shape: {raw_frame.shape}, Mesh shape: {mesh.shape}, Video path: {video_path}, None mesh frames: {not_mesh_list}"
+    # )
+
+    return raw_frame, mesh, video_info, not_mesh_list

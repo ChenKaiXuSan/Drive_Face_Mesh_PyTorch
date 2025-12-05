@@ -59,7 +59,7 @@ camera_position:
   dist_front: 0.62
   dist_left: 0.85
   dist_right: 0.85
-  baseline: 0.70  # left–right 的水平间距 (m)
+  baseline: 0.70 # left–right 的水平间距 (m)
 
 COCO_SKELETON:
   - (0, 1),
@@ -78,6 +78,8 @@ COCO_SKELETON:
   - (13, 15),
   - (12, 14),
   - (14, 16),
+
+debug: false
 
 vis:
   save_mesh_frame: true

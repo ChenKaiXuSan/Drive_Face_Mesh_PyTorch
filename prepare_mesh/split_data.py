@@ -1,116 +1,220 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
 """
-Split all video frames into four quadrants and save them in separate folders.
+Split a multi-view video into four sub-videos (left/right/dive_view/front)
+directly, without saving PNG frames, and also convert the original video
+to H.264 MP4.
 """
 
 from pathlib import Path
 from tqdm import tqdm
 import cv2
+import subprocess
 
 
-def split_and_save_frame(img, save_root: Path, frame_idx: int):
-    height, width = img.shape[:2]
+def convert_to_h264_mp4(input_video: Path, output_video: Path, overwrite: bool = True):
+    """
+    把任意视频转成 Label Studio / 浏览器友好的 MP4 格式：
+    - 容器：MP4
+    - 视频：mpeg4（内置编码器），yuv420p
+    - 音频：aac（不支持就改成 copy）
+    """
+    output_video.parent.mkdir(parents=True, exist_ok=True)
+    if overwrite and output_video.exists():
+        output_video.unlink()
+
+    cmd = [
+        "ffmpeg",
+        "-y",  # 覆盖输出
+        "-i",
+        str(input_video),
+        "-qscale:v",
+        "3",  # 1~5 质量不错，1最好，31最差
+        "-pix_fmt",
+        "yuv420p",
+        # 音频：先尝试 aac，不行的话可以改成 copy
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        # 让视频更适合流式播放（可选，但建议）
+        "-movflags",
+        "+faststart",
+        str(output_video),
+    ]
+
+    print("[FFMPEG]", " ".join(cmd))
+    subprocess.run(cmd, check=True)
+    print(f"[INFO] Converted to MP4 (Label Studio friendly) → {output_video}")
+
+
+def split_video_to_quadrants(
+    video_path: Path,
+    save_root: Path,
+    *,
+    crop_bottom: int = 30,
+    crop_left: int = 47,
+    crop_right: int = 10,
+):
+    """
+    直接从视频划分成四个视角子视频（left/right/dive_view/front），不经过图片中转。
+    """
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        print(f"[WARN] Cannot open video: {video_path}")
+        return
+
+    # 原始 FPS
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0:
+        fps = 30.0  # fallback
+
+    # 读一帧拿到尺寸
+    ret, frame = cap.read()
+    if not ret:
+        print(f"[WARN] Empty video: {video_path}")
+        cap.release()
+        return
+
+    # 按你原来的裁剪方式先 crop
+    frame = frame[:-crop_bottom, crop_left:-crop_right]
+    height, width = frame.shape[:2]
     mid_x, mid_y = width // 2, height // 2
 
-    # 划分四个区域
-    regions = {
-        "left": img[0:mid_y, 0:mid_x],
-        "right": img[0:mid_y, mid_x:width],
-        "dive_view": img[mid_y:height, 0:mid_x],
-        "front": img[mid_y:height, mid_x:width],
-    }
+    # 每个子视角的尺寸
+    h_top, h_bottom = mid_y, height - mid_y
+    w_left, w_right = mid_x, width - mid_x
 
-    for name, crop in regions.items():
-        region_dir = save_root / name
-        region_dir.mkdir(parents=True, exist_ok=True)
-        save_path = region_dir / f"{frame_idx:04d}.png"
-        cv2.imwrite(str(save_path), crop)
-        print(f"[INFO] Saved: {save_path}")
+    # 这里假定四个区域尺寸一样/近似，如果不是，也可以分别算
+    # 为简单起见：按上左块的尺寸建 writer
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # 容器是 mp4，编码实际依赖后端 ffmpeg
+    # 若你本地 OpenCV 的 ffmpeg 支持 H.264，可以尝试：cv2.VideoWriter_fourcc(*"avc1") 或 ("H","2","6","4")
 
+    writers = {}
 
-def process_video_all_frames(video_path: Path, save_root: Path):
-    cap = cv2.VideoCapture(str(video_path))
+    def make_writer(name, w, h):
+        out_dir = save_root
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{name}.mp4"
+        return out_path, cv2.VideoWriter(str(out_path), fourcc, fps, (w, h))
+
+    # 四个视角的视频 writer
+    out_left_path, writer_left = make_writer("left", w_left, h_top)
+    out_right_path, writer_right = make_writer("right", w_right, h_top)
+    out_dive_path, writer_dive = make_writer("dive_view", w_left, h_bottom)
+    out_front_path, writer_front = make_writer("front", w_right, h_bottom)
+
+    writers["left"] = writer_left
+    writers["right"] = writer_right
+    writers["dive_view"] = writer_dive
+    writers["front"] = writer_front
+
+    # 第一帧已经读了，先处理
     frame_idx = 0
-    success, frame = cap.read()
+    while True:
+        # 已经裁剪好的 frame
+        img = frame
 
-    while success:
+        # 划分四个区域
+        img_left = img[0:mid_y, 0:mid_x]
+        img_right = img[0:mid_y, mid_x:width]
+        img_dive = img[mid_y:height, 0:mid_x]
+        img_front = img[mid_y:height, mid_x:width]
 
-        # if frame_idx % 30 != 0:
-        #     break
+        writer_left.write(img_left)
+        writer_right.write(img_right)
+        writer_dive.write(img_dive)
+        writer_front.write(img_front)
 
-        # crop frame
-        frame = frame[:-30, 47:-10]
-        split_and_save_frame(frame, save_root, frame_idx)
         frame_idx += 1
-        success, frame = cap.read()
+        if frame_idx % 100 == 0:
+            print(f"[INFO] {video_path.name}: wrote {frame_idx} frames")
+
+        # 再读下一帧
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frame = frame[:-crop_bottom, crop_left:-crop_right]
 
     cap.release()
+    for name, w in writers.items():
+        w.release()
+
+    print(
+        f"[INFO] Split done for {video_path.name} → "
+        f"{out_left_path}, {out_right_path}, {out_dive_path}, {out_front_path}"
+    )
 
 
-def save_frame_to_video(image_path: Path, output_path: Path):
-
-    for view in image_path.iterdir():
-        if not view.is_dir():
-            continue
-
-        frames = []
-        sorted_frames = sorted(view.glob("*.png"), key=lambda x: int(x.stem))
-
-        for img_file in sorted_frames:
-            img = cv2.imread(str(img_file))
-            if img is not None:
-                frames.append(img)
-
-        # 获取第一帧的尺寸
-        height, width = frames[0].shape[:2]
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        _output_path = output_path / f"{view.name}.mp4"
-        if not _output_path.parent.exists():
-            _output_path.parent.mkdir(parents=True, exist_ok=True)
-        out = cv2.VideoWriter(str(_output_path), fourcc, 30.0, (width, height))
-
-        for frame in frames:
-            out.write(frame)
-
-        out.release()
-        print(f"[INFO] Video saved to: {_output_path}")
-
-
-def process_videos(data_root: Path, image_output_path: Path, video_output_path: Path):
-
+def process_videos(
+    data_root: Path,
+    split_video_output_path: Path,
+    original_video_output_path: Path,
+):
+    """
+    data_root:
+        person_01/
+            scene_a.mpg
+            scene_b.mpg
+        person_02/
+            ...
+    split_video_output_path:
+        person_01/scene_a/left/scene_a_left.mp4
+                            /right/...
+                            /dive_view/...
+                            /front/...
+    original_video_output_path:
+        person_01/scene_a_h264.mp4
+    """
     for person_dir in tqdm(
         data_root.iterdir(), desc="Processing person directories", ncols=100
     ):
-        if person_dir.is_dir():
-            for video_file in tqdm(person_dir.iterdir(), desc="Processing video files", ncols=100):
+        if not person_dir.is_dir():
+            continue
 
-                if video_file.stem.startswith("._"):
-                    continue
+        for video_file in tqdm(
+            person_dir.iterdir(),
+            desc=f"Processing videos in {person_dir.name}",
+            ncols=100,
+        ):
+            if video_file.stem.startswith("._"):
+                continue
+            if not (
+                video_file.is_file()
+                and video_file.suffix.lower() in [".mpg", ".avi", ".mov", ".mp4"]
+            ):
+                continue
 
-                if video_file.is_file() and video_file.suffix == ".mpg":
-                    print(f"[INFO] Processing: {video_file}")
-                    # 输出根目录按视频名命名
-                    image_output_root = (
-                        image_output_path / person_dir.stem / video_file.stem
-                    )
-                    process_video_all_frames(video_file, image_output_root)
+            print(f"[INFO] Processing: {video_file}")
 
-                    # save frame to video
-                    print(f"[INFO] Finished processing: {video_file}")
-                    video_output_root = (
-                        video_output_path / person_dir.stem / video_file.stem
-                    )
-                    save_frame_to_video(image_output_root, video_output_root)
+            # 1) 先做原始视频转 H.264 MP4
+            out_orig_mp4 = (
+                original_video_output_path
+                / person_dir.stem
+                / f"{video_file.stem}_h264.mp4"
+            )
+            out_orig_mp4.parent.mkdir(parents=True, exist_ok=True)
+            convert_to_h264_mp4(video_file, out_orig_mp4)
+
+            # 2) 再从原始（或 H.264 后）视频划分成四个子视角视频
+            split_root = split_video_output_path / person_dir.stem / video_file.stem
+            split_video_to_quadrants(video_file, split_root)
+
+            print(f"[INFO] Finished processing: {video_file}")
 
 
 if __name__ == "__main__":
-    # TODO: 不通过图片中转，直接从视频划分并保存视频，这样节省存储空间
+    # 原始数据根目录
     root_path = Path("/workspace/data/raw")
-    img_output_path = Path("/workspace/data/image")
-    video_output_path = Path("/workspace/data/videos")
 
-    img_output_path.mkdir(parents=True, exist_ok=True)
-    video_output_path.mkdir(parents=True, exist_ok=True)
+    # 划分后子视角视频的保存路径
+    split_video_output_path = Path("/workspace/data/videos_split")
 
-    process_videos(root_path, img_output_path, video_output_path)
+    # 原始视频转 H.264 MP4 后的保存路径
+    original_video_output_path = Path("/workspace/data/videos_h264")
+
+    split_video_output_path.mkdir(parents=True, exist_ok=True)
+    original_video_output_path.mkdir(parents=True, exist_ok=True)
+
+    process_videos(root_path, split_video_output_path, original_video_output_path)

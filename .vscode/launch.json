@@ -25,7 +25,8 @@
       "request": "launch",
       "module": "mesh_triangulation.main",
       "args": [
-        // "paths.mesh_path=/workspace/data/npz_debug"
+        "paths.mesh_path=/workspace/data/npz_debug",
+        "debug=True"
       ]
     }
   ]

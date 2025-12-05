@@ -251,7 +251,7 @@ def process_video_with_face_mesh(
             # save landmarks to npz
             save_info[str(frame_id)] = {
                 "raw_frame": rgb_frame,
-                "mesh": (landmarks_to_numpy(landmarks)) if landmarks is not None else None,
+                "mesh": (landmarks_to_numpy(landmarks)) if landmarks is not None else np.full((1, 478, 3), np.nan),
                 "video_info": {
                     "fps": cap.get(cv2.CAP_PROP_FPS),
                     "width": width,
