@@ -7,6 +7,10 @@
 		{
 			"name": "data",
 			"path": "/workspace/data"
+		},
+		{
+			"name": "Gymnastics_PyTorch",
+			"path": "../../Gymnastics_PyTorch"
 		}
 	]
 }
