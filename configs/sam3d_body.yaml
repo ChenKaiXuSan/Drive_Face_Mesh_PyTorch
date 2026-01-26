@@ -37,4 +37,4 @@ infer:
   gpu: 0
 
 dataset:
-  recursive: false
+  recursive: true
