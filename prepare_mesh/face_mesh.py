@@ -7,8 +7,8 @@ Created Date: Thursday July 17th 2025
 Author: Kaixu Chen
 -----
 Comment:
-This module uses MediaPipe FaceMesh to process images and videos, extracting 3D face landmarks and rendering face meshes.
-It supports both single image and video processing, saving results in structured directories.
+This module uses MediaPipe FaceMesh to process video frames, extracting 3D face landmarks and rendering face meshes.
+It supports video processing, saving results in structured directories.
 
 Have a good code time :)
 -----
@@ -20,12 +20,15 @@ Copyright (c) 2025 The University of Tsukuba
 HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
+
+26-01-2026	Kaixu Chen 去掉处理image的函数，只保留视频处理相关的
 """
+
+from pathlib import Path
+from typing import Optional
 
 import cv2
 import mediapipe as mp
-from typing import Tuple, Optional
-from pathlib import Path
 import numpy as np
 
 # ---------- 模块初始化 ----------
@@ -103,17 +106,6 @@ def save_mesh_png(rgba_img, out_path: Path):
 # ---------- 图像处理相关 ----------
 
 
-def load_image(img_path: Path) -> Tuple:
-    """读取并转换为 RGB 图像"""
-    if not img_path.exists():
-        raise FileNotFoundError(f"Image file not found: {img_path}")
-    bgr_img = cv2.imread(str(img_path))
-    if bgr_img is None:
-        raise ValueError(f"cv2 failed to read image: {img_path}")
-    rgb_img = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2RGB)
-    return bgr_img, rgb_img
-
-
 def predict_face_mesh(image_rgb, model) -> Optional[list]:
     """执行 FaceMesh 预测"""
     results = model.process(image_rgb)
@@ -138,40 +130,6 @@ def draw_face_mesh(image_bgr, face_landmarks) -> any:
             connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_contours_style(),
         )
     return image_bgr
-
-
-# ---------- 单张图片处理 ----------
-
-
-def process_image_with_face_mesh(
-    img_path: Path,
-    output_path: Optional[Path] = None,
-    show: bool = False,
-    max_faces: int = 1,
-):
-    """处理单张图片，绘制人脸 mesh"""
-    bgr_img, rgb_img = load_image(img_path)
-
-    with mp_face_mesh.FaceMesh(
-        static_image_mode=True,
-        max_num_faces=max_faces,
-        refine_landmarks=True,
-    ) as model:
-        landmarks = predict_face_mesh(rgb_img, model)
-
-        annotated_img = draw_face_mesh(bgr_img, landmarks) if landmarks else bgr_img
-
-        if output_path:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            cv2.imwrite(str(output_path), annotated_img)
-            print(f"[✓] Saved output to {output_path}")
-
-        if show:
-            cv2.imshow("Face Mesh (Image)", annotated_img)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
-
-        return annotated_img
 
 
 # ---------- 视频处理 ----------
@@ -219,7 +177,6 @@ def process_video_with_face_mesh(
         max_num_faces=max_faces,
         refine_landmarks=True,
     ) as model:
-
         save_info = {}
 
         while True:
@@ -251,7 +208,11 @@ def process_video_with_face_mesh(
             # save landmarks to npz
             save_info[str(frame_id)] = {
                 "raw_frame": rgb_frame,
-                "mesh": (landmarks_to_numpy(landmarks)) if landmarks is not None else np.full((1, 478, 3), np.nan),
+                "mesh": (
+                    (landmarks_to_numpy(landmarks))
+                    if landmarks is not None
+                    else np.full((1, 478, 3), np.nan)
+                ),
                 "video_info": {
                     "fps": cap.get(cv2.CAP_PROP_FPS),
                     "width": width,

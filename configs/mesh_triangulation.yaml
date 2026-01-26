@@ -48,7 +48,7 @@ camera_K:
 paths:
   log_path: logs/triangulated/${now:%Y-%m-%d}/${now:%H-%M-%S}
   mesh_path: /workspace/data/mesh
-  video_path: /workspace/data/videos
+  video_path: /workspace/data/videos_split
 
 camera_position:
   # 相机布局

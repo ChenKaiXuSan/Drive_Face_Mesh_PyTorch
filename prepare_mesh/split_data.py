@@ -1,9 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
 """
-Split a multi-view video into four sub-videos (left/right/dive_view/front)
+File: /workspace/code/prepare_mesh/split_data.py
+Project: /workspace/code/prepare_mesh
+Created Date: Saturday October 18th 2025
+Author: Kaixu Chen
+-----
+Comment:
+Split a multi-view video into four sub-videos (left/right/drive_view/front)
 directly, without saving PNG frames, and also convert the original video
 to H.264 MP4.
+
+Have a good code time :)
+-----
+Last Modified: Saturday October 18th 2025 10:32:21 pm
+Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.com>
+-----
+Copyright (c) 2026 The University of Tsukuba
+-----
+HISTORY:
+Date      	By	Comments
+----------	---	---------------------------------------------------------
+
+26-01-2026	Kaixu Chen	整理代码，保证帧的顺序一致
 """
 
 from pathlib import Path
@@ -51,7 +70,6 @@ def convert_to_h264_mp4(input_video: Path, output_video: Path, overwrite: bool =
 def split_video_to_quadrants(
     video_path: Path,
     save_root: Path,
-    *,
     crop_bottom: int = 30,
     crop_left: int = 47,
     crop_right: int = 10,
@@ -102,12 +120,12 @@ def split_video_to_quadrants(
     # 四个视角的视频 writer
     out_left_path, writer_left = make_writer("left", w_left, h_top)
     out_right_path, writer_right = make_writer("right", w_right, h_top)
-    out_dive_path, writer_dive = make_writer("dive_view", w_left, h_bottom)
+    out_drive_path, writer_drive = make_writer("drive_view", w_left, h_bottom)
     out_front_path, writer_front = make_writer("front", w_right, h_bottom)
 
     writers["left"] = writer_left
     writers["right"] = writer_right
-    writers["dive_view"] = writer_dive
+    writers["drive_view"] = writer_drive
     writers["front"] = writer_front
 
     # 第一帧已经读了，先处理
@@ -119,12 +137,12 @@ def split_video_to_quadrants(
         # 划分四个区域
         img_left = img[0:mid_y, 0:mid_x]
         img_right = img[0:mid_y, mid_x:width]
-        img_dive = img[mid_y:height, 0:mid_x]
+        img_drive = img[mid_y:height, 0:mid_x]
         img_front = img[mid_y:height, mid_x:width]
 
         writer_left.write(img_left)
         writer_right.write(img_right)
-        writer_dive.write(img_dive)
+        writer_drive.write(img_drive)
         writer_front.write(img_front)
 
         frame_idx += 1
@@ -143,7 +161,7 @@ def split_video_to_quadrants(
 
     print(
         f"[INFO] Split done for {video_path.name} → "
-        f"{out_left_path}, {out_right_path}, {out_dive_path}, {out_front_path}"
+        f"{out_left_path}, {out_right_path}, {out_drive_path}, {out_front_path}"
     )
 
 
@@ -212,6 +230,7 @@ if __name__ == "__main__":
     split_video_output_path = Path("/workspace/data/videos_split")
 
     # 原始视频转 H.264 MP4 后的保存路径
+    # * 这个是为了方便在 Label Studio 或浏览器里查看视频，不用于后续处理
     original_video_output_path = Path("/workspace/data/videos_h264")
 
     split_video_output_path.mkdir(parents=True, exist_ok=True)

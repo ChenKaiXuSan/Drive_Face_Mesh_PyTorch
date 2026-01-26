@@ -7,7 +7,7 @@ Created Date: Thursday July 17th 2025
 Author: Kaixu Chen
 -----
 Comment:
-Use prepare_mesh/face_mesh.py to process videos and images for 3D face mesh reconstruction.
+Use prepare_mesh/face_mesh.py to process video frames for 3D face mesh reconstruction.
 And save the results in a structured directory.
 
 The structure is as follows:
@@ -28,38 +28,37 @@ Copyright (c) 2025 The University of Tsukuba
 HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
+
+26-01-2026	Kaixu Chen	删除处理image的逻辑，只保留video处理
 """
 
 from pathlib import Path
+
 from tqdm import tqdm
 
-from prepare_mesh.face_mesh import (
-    process_video_with_face_mesh,
-    process_image_with_face_mesh,
-)
+from prepare_mesh.face_mesh import process_video_with_face_mesh
 
 
 def process(path, result_path=None):
-
-    if path.suffix.lower() in [".jpg", ".jpeg", ".png"]:
-        process_image_with_face_mesh(path, show=False, output_path=result_path)
-    elif path.suffix.lower() in [".mp4"]:
+    if path.suffix.lower() in [".mp4"]:
         process_video_with_face_mesh(path, save_npz=True, output_path=result_path)
     else:
         raise ValueError(f"Unsupported file type: {path.suffix}")
 
 
 if __name__ == "__main__":
-
-    video_input_dir = Path("/workspace/data/videos")
-    image_input_dir = Path("/workspace/data/image")
+    video_input_dir = Path("/workspace/data/videos_split")
     result_dir = Path("/workspace/data/mesh")
 
-    for one_person in tqdm(video_input_dir.iterdir(), desc="Processing person", ncols=100):
+    for one_person in tqdm(
+        video_input_dir.iterdir(), desc="Processing person", ncols=100
+    ):
         if not one_person.is_dir():
             continue
 
-        for video_dir in tqdm(one_person.iterdir(), desc="Processing one person videos", ncols=100):
+        for video_dir in tqdm(
+            one_person.iterdir(), desc="Processing one person videos", ncols=100
+        ):
             if not video_dir.is_dir():
                 continue
 

@@ -211,10 +211,11 @@ def process_frame_list(
         vis_results(
             img_cv2=frame_list[idx],
             outputs=[best_person],
-            faces=estimator.faces,
             save_dir=str(out_dir / "visualization" / f"frame_{idx:04d}"),
             image_name=f"frame_{idx:04d}",
+            faces=estimator.faces,
             visualizer=visualizer,
+            cfg=cfg.visualize,
         )
 
         outputs = best_person

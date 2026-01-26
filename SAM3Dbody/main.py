@@ -1,229 +1,209 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# -*- coding:utf-8 -*-
+"""
+File: /workspace/code/SAM3Dbody/main_multi_gpu_process.py
+Project: /workspace/code/SAM3Dbody
+Created Date: Monday January 26th 2026
+Author: Kaixu Chen
+-----
+Comment:
+根据多GPU并行处理SAM-3D-Body推理任务。
+
+Have a good code time :)
+-----
+Last Modified: Monday January 26th 2026 5:12:10 pm
+Modified By: the developer formerly known as Kaixu Chen at <chenkaixusan@gmail.com>
+-----
+Copyright (c) 2026 The University of Tsukuba
+-----
+HISTORY:
+Date      	By	Comments
+----------	---	---------------------------------------------------------
+"""
 
 import logging
 import os
+import multiprocessing as mp
 from pathlib import Path
 from typing import Dict, List
+import numpy as np
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
+# 假设这些是从你的其他模块导入的
 from .infer import process_frame_list
 from .load import load_data
 
+# --- 常量定义 ---
+REQUIRED_VIEWS = {"front", "left", "right"}
+
 logger = logging.getLogger(__name__)
 
-VALID_VIEWS = {"front", "left", "right"}
-REQUIRED_VIEWS = {"front", "left", "right"}  # VIDEO 是否强制三视角齐全
-
 
 # ---------------------------------------------------------------------
-# Utils
+# 核心处理逻辑：处理单个人的数据
 # ---------------------------------------------------------------------
-def list_dirs(p: Path) -> List[Path]:
-    return sorted([x for x in p.iterdir() if x.is_dir()])
-
-
-def rel_to_root(root: Path, p: Path) -> Path:
-    return p.relative_to(root)
-
-
-def collect_video_views(env_dir: Path, patterns: List[str]) -> Dict[str, Path]:
-    """Collect front/left/right videos under env_dir (ignore dive_view)."""
-    view_map: Dict[str, Path] = {}
-    for pat in patterns:
-        for f in env_dir.glob(pat):
-            stem = f.stem.lower()  # front/left/right/dive_view
-            if stem in VALID_VIEWS:
-                view_map[stem] = f.resolve()
-    return view_map
-
-
-def collect_images_in_view_dir(view_dir: Path, patterns: List[str]) -> List[Path]:
-    files: List[Path] = []
-    for pat in patterns:
-        files.extend(view_dir.glob(pat))
-    return sorted({f.resolve() for f in files if f.is_file()})
-
-
-# ---------------------------------------------------------------------
-# VIDEO: videos/{person}/{env}/{front,left,right}.mp4
-# Process order: person -> env
-# ---------------------------------------------------------------------
-def run_video_person_env(
-    video_root: Path,
+def process_single_person(
+    person_dir: Path,
+    source_root: Path,
     out_root: Path,
     infer_root: Path,
     cfg: DictConfig,
-    require_all_views: bool = True,
-) -> int:
+):
+    """处理单个人员的所有环境和视角"""
+    person_id = person_dir.name
     vid_patterns = ["*.mp4", "*.mov", "*.avi", "*.mkv", "*.MP4", "*.MOV"]
 
-    done = 0
-    person_dirs = list_dirs(video_root)
-    if not person_dirs:
-        raise RuntimeError(f"No person dirs under: {video_root}")
+    # --- 1. Person専用のログ設定 ---
+    log_dir = out_root / "person_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    person_log_file = log_dir / f"{person_id}.log"
 
-    for person_dir in person_dirs:
-        person_id = person_dir.name
-        logger.info(f"==== PERSON START (VIDEO): {person_id} ====")
+    # 新しいハンドラを作成
+    handler = logging.FileHandler(person_log_file, mode="a", encoding="utf-8")
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    handler.setFormatter(formatter)
 
-        env_dirs = list_dirs(person_dir)
-        if not env_dirs:
-            logger.warning(f"[No env dirs] {person_dir}")
+    logger = logging.getLogger(person_id)  # このPerson専用のロガーを取得
+    logger.addHandler(handler)
+    logger.propagate = False  # 親（Root）ロガーにログを流さない（混ざるのを防ぐ）
+
+    logger.info(f"==== Starting Process for Person: {person_id} ====")
+
+    env_dirs = sorted([x for x in person_dir.iterdir() if x.is_dir()])
+    if not env_dirs:
+        logger.warning(f"跳过：{person_dir} 下没有环境目录")
+        return
+
+    for env_dir in env_dirs:
+        env_name = env_dir.name
+        rel_env = env_dir.relative_to(source_root)
+
+        # --- 视频处理逻辑 ---
+        view_map: Dict[str, Path] = {}
+        for pat in vid_patterns:
+            for f in env_dir.glob(pat):
+                stem = f.stem.lower()
+                if stem in REQUIRED_VIEWS:
+                    view_map[stem] = f.resolve()
+
+        if not all(v in view_map for v in REQUIRED_VIEWS):
+            logger.warning(f"[Skip] {rel_env}: 视角不全 {list(view_map.keys())}")
             continue
 
-        for env_dir in env_dirs:
-            env_name = env_dir.name
-            rel_env = rel_to_root(video_root, env_dir)  # e.g. 01/夜多い
+        view_frames: Dict[str, List[np.ndarray]] = load_data(view_map)
 
-            view_map = collect_video_views(env_dir, vid_patterns)
+        _execute_inference(view_frames, out_root / rel_env, infer_root / rel_env, cfg)
 
-            if require_all_views and REQUIRED_VIEWS and not REQUIRED_VIEWS.issubset(view_map.keys()):
-                logger.warning(
-                    f"[Skip] VIDEO {rel_env}: missing views, found={sorted(view_map.keys())}"
-                )
-                continue
 
-            if not view_map:
-                logger.warning(f"[No valid video views] {rel_env}")
-                continue
+def _execute_inference(view_frames, out_dir, infer_dir, cfg):
+    """执行推断的辅助函数"""
+    for view, frames in view_frames.items():
+        logger.info(f"视角 {view} 包含 {len(frames)} 帧数据。")
 
-            file_list = [view_map[v] for v in ("front", "left", "right") if v in view_map]
+        out_dir = out_dir / view
+        infer_dir = infer_dir / view
+        out_dir.mkdir(parents=True, exist_ok=True)
+        infer_dir.mkdir(parents=True, exist_ok=True)
 
-            logger.info(f"Processing VIDEO: person={person_id} env={env_name} | files={[p.name for p in file_list]}")
-
-            frame_list = load_data(file_list)
-
-            current_out_dir = out_root / rel_env
-            current_infer_dir = infer_root / rel_env
-            current_out_dir.mkdir(parents=True, exist_ok=True)
-            current_infer_dir.mkdir(parents=True, exist_ok=True)
-
-            process_frame_list(
-                frame_list=frame_list,
-                out_dir=current_out_dir,
-                inference_output_path=current_infer_dir,
-                cfg=cfg,
-            )
-            done += 1
-
-        logger.info(f"==== PERSON DONE (VIDEO): {person_id} ====")
-
-    return done
+        process_frame_list(
+            frame_list=frames,
+            out_dir=out_dir,
+            inference_output_path=infer_dir,
+            cfg=cfg,
+        )
 
 
 # ---------------------------------------------------------------------
-# IMAGE: image/{person}/{env}/{front,left,right}/*.png
-# Process order: person -> env -> view
+# GPU Worker：进程执行函数
 # ---------------------------------------------------------------------
-def run_image_person_env(
-    image_root: Path,
+def gpu_worker(
+    gpu_id: int,
+    person_dirs: List[Path],
+    source_root: Path,
     out_root: Path,
     infer_root: Path,
-    cfg: DictConfig,
-) -> int:
-    img_patterns = ["*.png", "*.jpg", "*.jpeg", "*.PNG", "*.JPG", "*.JPEG"]
+    cfg_dict: dict,
+):
+    """
+    每个进程的入口：设置环境变量，并处理分配的任务列表
+    """
+    # 1. 隔离 GPU
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
 
-    done = 0
-    person_dirs = list_dirs(image_root)
-    if not person_dirs:
-        raise RuntimeError(f"No person dirs under: {image_root}")
+    cfg_dict["infer"]["gpu"] = 0  # 因为上面已经隔离了 GPU，所以这里设为 0
 
-    for person_dir in person_dirs:
-        person_id = person_dir.name
-        logger.info(f"==== PERSON START (IMAGE): {person_id} ====")
+    # 2. 将字典转回 Hydra 配置（多进程传递对象时，转为字典更安全）
+    cfg = OmegaConf.create(cfg_dict)
 
-        env_dirs = list_dirs(person_dir)
-        if not env_dirs:
-            logger.warning(f"[No env dirs] {person_dir}")
-            continue
+    logger.info(f"🟢 GPU {gpu_id} 进程启动，待处理人数: {len(person_dirs)}")
 
-        for env_dir in env_dirs:
-            env_name = env_dir.name
-            logger.info(f"---- ENV START (IMAGE): person={person_id} env={env_name} ----")
+    for p_dir in person_dirs:
+        try:
+            process_single_person(p_dir, source_root, out_root, infer_root, cfg)
+        except Exception as e:
+            logger.error(f"❌ GPU {gpu_id} 处理 {p_dir.name} 时出错: {e}")
 
-            # env_dir 下按 view 目录组织：front/left/right/dive_view
-            for view_name in REQUIRED_VIEWS:
-                view_dir = env_dir / view_name
-                if not view_dir.exists():
-                    logger.warning(f"[Skip] IMAGE missing view dir: {rel_to_root(image_root, view_dir)}")
-                    continue
-
-                files = collect_images_in_view_dir(view_dir, img_patterns)
-                if not files:
-                    logger.warning(f"[Skip] IMAGE empty view dir: {rel_to_root(image_root, view_dir)}")
-                    continue
-
-                rel_view = rel_to_root(image_root, view_dir)  # e.g. 01/夜多い/front
-                logger.info(f"Processing IMAGE: {rel_view} | n_files={len(files)}")
-
-                frame_list = load_data(files)
-
-                current_out_dir = out_root / rel_view
-                current_infer_dir = infer_root / rel_view
-                current_out_dir.mkdir(parents=True, exist_ok=True)
-                current_infer_dir.mkdir(parents=True, exist_ok=True)
-
-                process_frame_list(
-                    frame_list=frame_list,
-                    out_dir=current_out_dir,
-                    inference_output_path=current_infer_dir,
-                    cfg=cfg,
-                )
-                done += 1
-
-            logger.info(f"---- ENV DONE (IMAGE): person={person_id} env={env_name} ----")
-
-        logger.info(f"==== PERSON DONE (IMAGE): {person_id} ====")
-
-    return done
+    logger.info(f"🏁 GPU {gpu_id} 所有任务处理完毕")
 
 
 # ---------------------------------------------------------------------
-# Main
+# Main 入口
 # ---------------------------------------------------------------------
 @hydra.main(config_path="../configs", config_name="sam3d_body", version_base=None)
 def main(cfg: DictConfig) -> None:
-    logger.info("==== Config ====\n" + OmegaConf.to_yaml(cfg))
-
-    infer_type = cfg.infer.get("type", "video")  # video | image
-
+    # 1. 路径准备
     out_root = Path(cfg.paths.log_path).resolve()
     infer_root = Path(cfg.paths.result_output_path).resolve()
-    out_root.mkdir(parents=True, exist_ok=True)
-    infer_root.mkdir(parents=True, exist_ok=True)
+    source_root = Path(cfg.paths.video_path).resolve()
 
-    if infer_type == "video":
-        video_root = Path(cfg.paths.video_path).resolve()
-        if not video_root.exists():
-            raise FileNotFoundError(f"video_path not found: {video_root}")
+    gpu_ids = cfg.infer.get("gpu", [0, 1])  # 从配置文件读取 GPU 列表，默认 [0, 1]
 
-        done = run_video_person_env(
-            video_root=video_root,
-            out_root=out_root,
-            infer_root=infer_root,
-            cfg=cfg,
-            require_all_views=True,  # 改 False 则缺视角也跑
+    all_person_dirs = sorted([x for x in source_root.iterdir() if x.is_dir()])
+    if not all_person_dirs:
+        logger.error(f"未找到数据目录: {source_root}")
+        return
+
+    # 2. 自动分组逻辑 (Task Chunking)
+    # 将所有目录分成 N 份，N 等于 GPU 的数量
+    num_gpus = len(gpu_ids)
+    # 使用 np.array_split 可以确保即使除不尽，分配也尽可能均匀
+    chunks = np.array_split(all_person_dirs, num_gpus)
+
+    logger.info(f"检测到 {num_gpus} 个 GPU: {gpu_ids}")
+    for i, gpu_id in enumerate(gpu_ids):
+        logger.info(f"  - GPU {gpu_id} 分配任务数: {len(chunks[i])}")
+
+    # 3. 启动并行进程
+    cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+    mp.set_start_method("spawn", force=True)
+
+    processes = []
+    for i, gpu_id in enumerate(gpu_ids):
+        person_list = chunks[i].tolist()  # 转回普通列表
+        if not person_list:
+            continue
+
+        p = mp.Process(
+            target=gpu_worker,
+            args=(
+                gpu_id,
+                person_list,
+                source_root,
+                out_root,
+                infer_root,
+                cfg_dict,
+            ),
         )
+        p.start()
+        processes.append(p)
 
-    elif infer_type == "image":
-        image_root = Path(cfg.paths.image_path).resolve()
-        if not image_root.exists():
-            raise FileNotFoundError(f"image_path not found: {image_root}")
+    # 4. 等待所有进程完成
+    for p in processes:
+        p.join()
 
-        done = run_image_person_env(
-            image_root=image_root,
-            out_root=out_root,
-            infer_root=infer_root,
-            cfg=cfg,
-        )
-
-    else:
-        raise ValueError(f"Unknown infer.type: {infer_type} (expected 'video' or 'image')")
-
-    logger.info(f"==== ALL DONE ==== processed_tasks={done}")
+    logger.info("🎉 [SUCCESS] 所有 GPU 任务已圆满完成！")
 
 
 if __name__ == "__main__":

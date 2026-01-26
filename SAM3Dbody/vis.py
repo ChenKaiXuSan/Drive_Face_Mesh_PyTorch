@@ -256,16 +256,16 @@ def vis_results(
     save_dir: str,
     image_name: str,
     visualizer: SkeletonVisualizer,
+    cfg: Optional[Dict[str, Any]] = None,
 ):
     """Save 3D mesh results to files and return PLY file paths"""
 
     os.makedirs(save_dir, exist_ok=True)
-    ply_files = []
 
     img_cv2 = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
 
     # Save focal length
-    if outputs:
+    if outputs and cfg.get("save_focal_length", False):
         focal_length_data = {"focal_length": float(outputs[0]["focal_length"])}
         focal_length_path = os.path.join(save_dir, f"{image_name}_focal_length.json")
         with open(focal_length_path, "w") as f:
@@ -277,92 +277,98 @@ def vis_results(
         renderer = Renderer(focal_length=person_output["focal_length"], faces=faces)
 
         # Store individual mesh
-        tmesh = renderer.vertices_to_trimesh(
-            person_output["pred_vertices"], person_output["pred_cam_t"], LIGHT_BLUE
-        )
-        mesh_filename = f"{image_name}_mesh_{pid:03d}.ply"
-        mesh_path = os.path.join(save_dir, mesh_filename)
-        tmesh.export(mesh_path)
-        ply_files.append(mesh_path)
+        if cfg.get("save_mesh_ply", False):
+            tmesh = renderer.vertices_to_trimesh(
+                person_output["pred_vertices"], person_output["pred_cam_t"], LIGHT_BLUE
+            )
+            mesh_filename = f"{image_name}_mesh_{pid:03d}.ply"
+            mesh_path = os.path.join(save_dir, mesh_filename)
+            tmesh.export(mesh_path)
+
+            logger.info(f"Saved mesh ply file: {mesh_path}")
 
         # Save individual overlay image
-        img_mesh_overlay = (
-            renderer(
-                person_output["pred_vertices"],
-                person_output["pred_cam_t"],
-                img_cv2.copy(),
-                mesh_base_color=LIGHT_BLUE,
-                scene_bg_color=(1, 1, 1),
-            )
-            * 255
-        ).astype(np.uint8)
+        if cfg.get("save_mesh_overlay", False):
+            img_mesh_overlay = (
+                renderer(
+                    person_output["pred_vertices"],
+                    person_output["pred_cam_t"],
+                    img_cv2.copy(),
+                    mesh_base_color=LIGHT_BLUE,
+                    scene_bg_color=(1, 1, 1),
+                )
+                * 255
+            ).astype(np.uint8)
 
-        overlay_filename = f"{image_name}_overlay_{pid:03d}.png"
-        cv2.imwrite(os.path.join(save_dir, overlay_filename), img_mesh_overlay)
+            overlay_filename = f"{image_name}_overlay_{pid:03d}.png"
+            cv2.imwrite(os.path.join(save_dir, overlay_filename), img_mesh_overlay)
+            logger.info(f"Saved overlay: {os.path.join(save_dir, overlay_filename)}")
 
         # Save bbox image
-        img_bbox = img_cv2.copy()
-        bbox = person_output["bbox"]
-        img_bbox = cv2.rectangle(
-            img_bbox,
-            (int(bbox[0]), int(bbox[1])),
-            (int(bbox[2]), int(bbox[3])),
-            (0, 255, 0),
-            4,
-        )
-        bbox_filename = f"{image_name}_bbox_{pid:03d}.png"
-        cv2.imwrite(os.path.join(save_dir, bbox_filename), img_bbox)
-
-        logger.info(f"Saved mesh: {mesh_path}")
-        logger.info(f"Saved overlay: {os.path.join(save_dir, overlay_filename)}")
-        logger.info(f"Saved bbox: {os.path.join(save_dir, bbox_filename)}")
+        if cfg.get("save_bbox_image", False):
+            img_bbox = img_cv2.copy()
+            bbox = person_output["bbox"]
+            img_bbox = cv2.rectangle(
+                img_bbox,
+                (int(bbox[0]), int(bbox[1])),
+                (int(bbox[2]), int(bbox[3])),
+                (0, 255, 0),
+                4,
+            )
+            bbox_filename = f"{image_name}_bbox_{pid:03d}.png"
+            cv2.imwrite(os.path.join(save_dir, bbox_filename), img_bbox)
+            logger.info(f"Saved bbox: {os.path.join(save_dir, bbox_filename)}")
 
         # 2D 结果可视化
-        vis_results = visualize_2d_results(img_cv2, outputs, visualizer)
-        cv2.imwrite(
-            os.path.join(save_dir, f"{image_name}_2d_visualization.png"),
-            vis_results[pid],
-        )
-        logger.info(
-            f"Saved 2D visualization: {os.path.join(save_dir, f'{image_name}_2d_visualization.png')}"
-        )
+        if cfg.get("plot_2d", False):
+            vis_results = visualize_2d_results(img_cv2, outputs, visualizer)
+            cv2.imwrite(
+                os.path.join(save_dir, f"{image_name}_2d_visualization.png"),
+                vis_results[pid],
+            )
+            logger.info(
+                f"Saved 2D visualization: {os.path.join(save_dir, f'{image_name}_2d_visualization.png')}"
+            )
 
         # 3D 网格可视化
-        mesh_results = visualize_3d_mesh(img_cv2, outputs, faces)
-        # Display results
+        if cfg.get("save_3d_mesh", False):
+            mesh_results = visualize_3d_mesh(img_cv2, outputs, faces)
+            # Display results
 
-        cv2.imwrite(
-            os.path.join(save_dir, f"{image_name}_3d_mesh_visualization_{pid}.png"),
-            mesh_results[pid],
-        )
+            cv2.imwrite(
+                os.path.join(save_dir, f"{image_name}_3d_mesh_visualization_{pid}.png"),
+                mesh_results[pid],
+            )
 
-        logger.info(
-            f"Saved 3D mesh visualization: {os.path.join(save_dir, f'{image_name}_3d_mesh_visualization_{pid}.png')}"
-        )
+            logger.info(
+                f"Saved 3D mesh visualization: {os.path.join(save_dir, f'{image_name}_3d_mesh_visualization_{pid}.png')}"
+            )
 
         # 3D kpt可视化
-        kpt3d_img = visualize_3d_skeleton(
-            img_cv2=img_cv2.copy(), outputs=outputs, visualizer=visualizer
-        )
-        cv2.imwrite(
-            os.path.join(save_dir, f"{image_name}_3d_kpt_visualization_{pid}.png"),
-            kpt3d_img,
-        )
-        logger.info(
-            f"Saved 3D keypoint visualization: {os.path.join(save_dir, f'{image_name}_3d_kpt_visualization_{pid}.png')}"
-        )
+        if cfg.get("save_3d_keypoints", False):
+            kpt3d_img = visualize_3d_skeleton(
+                img_cv2=img_cv2.copy(), outputs=outputs, visualizer=visualizer
+            )
+            cv2.imwrite(
+                os.path.join(save_dir, f"{image_name}_3d_kpt_visualization_{pid}.png"),
+                kpt3d_img,
+            )
+            logger.info(
+                f"Saved 3D keypoint visualization: {os.path.join(save_dir, f'{image_name}_3d_kpt_visualization_{pid}.png')}"
+            )
 
         # 综合可视化
-        together_img = visualize_sample_together(
-            img_cv2=img_cv2,
-            outputs=outputs,
-            faces=faces,
-            visualizer=visualizer,
-        )
-        cv2.imwrite(
-            os.path.join(save_dir, f"{image_name}_together_visualization.png"),
-            together_img,
-        )
-        logger.info(
-            f"Saved together visualization: {os.path.join(save_dir, f'{image_name}_together_visualization.png')}"
-        )
+        if cfg.get("save_together", False):
+            together_img = visualize_sample_together(
+                img_cv2=img_cv2,
+                outputs=outputs,
+                faces=faces,
+                visualizer=visualizer,
+            )
+            cv2.imwrite(
+                os.path.join(save_dir, f"{image_name}_together_visualization.png"),
+                together_img,
+            )
+            logger.info(
+                f"Saved together visualization: {os.path.join(save_dir, f'{image_name}_together_visualization.png')}"
+            )
