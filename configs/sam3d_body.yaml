@@ -34,7 +34,7 @@ infer:
   conf_thres: 50.0
   keep_frames: true
   num_inference_steps: 4
-  gpu_ids: [0, 1]  # 指定使用的 GPU 列表
+  gpu: [0, 1]  # 指定使用的 GPU 列表
 
 dataset:
   recursive: true

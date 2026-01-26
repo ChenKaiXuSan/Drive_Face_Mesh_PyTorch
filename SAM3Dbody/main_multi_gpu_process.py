@@ -117,6 +117,8 @@ def gpu_worker(
     # 1. 隔离 GPU
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
 
+    cfg_dict["infer"]["gpu"] = 0  # 因为上面已经隔离了 GPU，所以这里设为 0
+
     # 2. 将字典转回 Hydra 配置（多进程传递对象时，转为字典更安全）
     cfg = OmegaConf.create(cfg_dict)
 
@@ -146,7 +148,7 @@ def main(cfg: DictConfig) -> None:
         cfg.paths.video_path if infer_type == "video" else cfg.paths.image_path
     ).resolve()
 
-    gpu_ids = cfg.infer.get("gpu_ids", [0, 1])  # 从配置文件读取 GPU 列表，默认 [0, 1]
+    gpu_ids = cfg.infer.get("gpu", [0, 1])  # 从配置文件读取 GPU 列表，默认 [0, 1]
 
     all_person_dirs = sorted([x for x in source_root.iterdir() if x.is_dir()])
     if not all_person_dirs:
