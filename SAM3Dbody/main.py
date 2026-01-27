@@ -94,25 +94,19 @@ def process_single_person(
 
         view_frames: Dict[str, List[np.ndarray]] = load_data(view_map)
 
-        _execute_inference(view_frames, out_root / rel_env, infer_root / rel_env, cfg)
+        for view, frames in view_frames.items():
+            logger.info(f"  视角 {view} 处理了 {len(frames)} 帧数据。")
+            _out_root = out_root / rel_env / view
+            _out_root.mkdir(parents=True, exist_ok=True)
+            _infer_root = infer_root / rel_env / view
+            _infer_root.mkdir(parents=True, exist_ok=True)
 
-
-def _execute_inference(view_frames, out_dir, infer_dir, cfg):
-    """执行推断的辅助函数"""
-    for view, frames in view_frames.items():
-        logger.info(f"视角 {view} 包含 {len(frames)} 帧数据。")
-
-        out_dir = out_dir / view
-        infer_dir = infer_dir / view
-        out_dir.mkdir(parents=True, exist_ok=True)
-        infer_dir.mkdir(parents=True, exist_ok=True)
-
-        process_frame_list(
-            frame_list=frames,
-            out_dir=out_dir,
-            inference_output_path=infer_dir,
-            cfg=cfg,
-        )
+            process_frame_list(
+                frame_list=frames,
+                out_dir=_out_root,
+                inference_output_path=_infer_root,
+                cfg=cfg,
+            )
 
 
 # ---------------------------------------------------------------------
@@ -151,39 +145,105 @@ def gpu_worker(
 # ---------------------------------------------------------------------
 # Main 入口
 # ---------------------------------------------------------------------
+# @hydra.main(config_path="../configs", config_name="sam3d_body", version_base=None)
+# def main(cfg: DictConfig) -> None:
+#     # 1. 路径准备
+#     out_root = Path(cfg.paths.log_path).resolve()
+#     infer_root = Path(cfg.paths.result_output_path).resolve()
+#     source_root = Path(cfg.paths.video_path).resolve()
+
+#     gpu_ids = cfg.infer.get("gpu", [0, 1])  # 从配置文件读取 GPU 列表，默认 [0, 1]
+
+#     all_person_dirs = sorted([x for x in source_root.iterdir() if x.is_dir()])
+#     if not all_person_dirs:
+#         logger.error(f"未找到数据目录: {source_root}")
+#         return
+
+#     # 2. 自动分组逻辑 (Task Chunking)
+#     # 将所有目录分成 N 份，N 等于 GPU 的数量
+#     num_gpus = len(gpu_ids)
+#     # 使用 np.array_split 可以确保即使除不尽，分配也尽可能均匀
+#     chunks = np.array_split(all_person_dirs, num_gpus)
+
+#     logger.info(f"检测到 {num_gpus} 个 GPU: {gpu_ids}")
+#     for i, gpu_id in enumerate(gpu_ids):
+#         logger.info(f"  - GPU {gpu_id} 分配任务数: {len(chunks[i])}")
+
+#     # 3. 启动并行进程
+#     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+#     mp.set_start_method("spawn", force=True)
+
+#     processes = []
+#     for i, gpu_id in enumerate(gpu_ids):
+#         person_list = chunks[i].tolist()  # 转回普通列表
+#         if not person_list:
+#             continue
+
+#         p = mp.Process(
+#             target=gpu_worker,
+#             args=(
+#                 gpu_id,
+#                 person_list,
+#                 source_root,
+#                 out_root,
+#                 infer_root,
+#                 cfg_dict,
+#             ),
+#         )
+#         p.start()
+#         processes.append(p)
+
+#     # 4. 等待所有进程完成
+#     for p in processes:
+#         p.join()
+
+#     logger.info("🎉 [SUCCESS] 所有 GPU 任务已圆满完成！")
+
+
+# ---------------------------------------------------------------------
+# Main 入口
+# ---------------------------------------------------------------------
 @hydra.main(config_path="../configs", config_name="sam3d_body", version_base=None)
 def main(cfg: DictConfig) -> None:
-    # 1. 路径准备
+    # 1. 経路準備
     out_root = Path(cfg.paths.log_path).resolve()
     infer_root = Path(cfg.paths.result_output_path).resolve()
     source_root = Path(cfg.paths.video_path).resolve()
 
-    gpu_ids = cfg.infer.get("gpu", [0, 1])  # 从配置文件读取 GPU 列表，默认 [0, 1]
+    # --- 設定の追加 ---
+    gpu_ids = cfg.infer.get("gpu", [0, 1])  # 使用するGPUのリスト
+    workers_per_gpu = cfg.infer.get("workers_per_gpu", 2)  # 1枚あたりのプロセス数
+    
+    # 実際に起動するプロセスの数だけGPU IDを並べる (例: [0, 0, 1, 1])
+    expanded_gpu_ids = []
+    for gid in gpu_ids:
+        expanded_gpu_ids.extend([gid] * workers_per_gpu)
+    
+    total_workers = len(expanded_gpu_ids)
+    # ------------------
 
     all_person_dirs = sorted([x for x in source_root.iterdir() if x.is_dir()])
     if not all_person_dirs:
         logger.error(f"未找到数据目录: {source_root}")
         return
 
-    # 2. 自动分组逻辑 (Task Chunking)
-    # 将所有目录分成 N 份，N 等于 GPU 的数量
-    num_gpus = len(gpu_ids)
-    # 使用 np.array_split 可以确保即使除不尽，分配也尽可能均匀
-    chunks = np.array_split(all_person_dirs, num_gpus)
+    # 2. 自動分组逻辑 (プロセスの総数で分割)
+    chunks = np.array_split(all_person_dirs, total_workers)
 
-    logger.info(f"检测到 {num_gpus} 个 GPU: {gpu_ids}")
-    for i, gpu_id in enumerate(gpu_ids):
-        logger.info(f"  - GPU {gpu_id} 分配任务数: {len(chunks[i])}")
+    logger.info(f"使用 GPU: {gpu_ids} (各 {workers_per_gpu} ワーカー)")
+    logger.info(f"総プロセス数: {total_workers}")
 
     # 3. 启动并行进程
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
     mp.set_start_method("spawn", force=True)
 
     processes = []
-    for i, gpu_id in enumerate(gpu_ids):
-        person_list = chunks[i].tolist()  # 转回普通列表
+    for i, gpu_id in enumerate(expanded_gpu_ids):
+        person_list = chunks[i].tolist()
         if not person_list:
             continue
+
+        logger.info(f"  - Worker {i} (GPU {gpu_id}) 分配任务数: {len(person_list)}")
 
         p = mp.Process(
             target=gpu_worker,
@@ -204,7 +264,6 @@ def main(cfg: DictConfig) -> None:
         p.join()
 
     logger.info("🎉 [SUCCESS] 所有 GPU 任务已圆满完成！")
-
 
 if __name__ == "__main__":
     os.environ["HYDRA_FULL_ERROR"] = "1"
