@@ -8,11 +8,14 @@
 #PBS -e logs/pegasus/sam3d_group_${PBS_SUBREQNO}_err.log
 
 # === 1. 環境準備 ===
-cd /work/SKIING/chenkaixu/code/ClinicalGait-CrossAttention_ASD_PyTorch
+cd /work/SKIING/chenkaixu/code/Drive_Face_Mesh_PyTorch
+
+mkdir -p logs/pegasus/
+
 module load intelpython/2022.3.1
 source ${CONDA_PREFIX}/etc/profile.d/conda.sh
 conda deactivate
-source /work/SKIING/chenkaixu/code/med_atn/bin/activate
+conda activate /home/SKIING/chenkaixu/miniconda3/envs/sam_3d_body
 
 # --- マッピング定義 (Dictionary形式) ---
 declare -A ID_MAP
@@ -20,7 +23,6 @@ ID_MAP["0"]="[01,02,03,04,05,06]"
 ID_MAP["1"]="[07,08,09,10,11,12]"
 ID_MAP["2"]="[13,14,15,16,17,18]"
 ID_MAP["3"]="[19,20,21,24]"
-
 # 現在のタスク用リストを取得
 PERSON_LIST=${ID_MAP[$PBS_SUBREQNO]}
 
@@ -28,10 +30,11 @@ echo "Node Index: $PBS_SUBREQNO"
 echo "Processing folders: $PERSON_LIST"
 
 # === 3. パス設定と実行 ===
-RESULT_PATH="/work/SKIING/chenkaixu/data/sam3d_body_results"
-CKPT_ROOT="/work/SKIING/chenkaixu/code/ckpt/sam-3d-body-dinov3"
+VIDEO_PATH="/work/SKIING/chenkaixu/data/drive/videos_split"
+RESULT_PATH="/work/SKIING/chenkaixu/data/drive/sam3d_body_results"
+CKPT_ROOT="/work/SKIING/chenkaixu/code/Drive_Face_Mesh_PyTorch/ckpt/sam-3d-body-dinov3"
 
-python -m project.main \
+python -m SAM3Dbody.main \
     paths.video_path=${VIDEO_PATH} \
     paths.result_output_path=${RESULT_PATH} \
     model.root_path=${CKPT_ROOT} \

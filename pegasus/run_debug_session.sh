@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# === 1. 参数设定 ===
+PROJECT_NAME="SKIING"                 # 你的项目名（必须改）
+TIME="01:00:00"                        # 申请时长（最大 01:00:00）
+
+# === 1. 環境準備 ===
+cd /work/SKIING/chenkaixu/code/Drive_Face_Mesh_PyTorch
+module load intelpython/2022.3.1
+source ${CONDA_PREFIX}/etc/profile.d/conda.sh
+conda deactivate
+source /home/SKIING/chenkaixu/miniconda3/envs/sam_3d_body/bin/activate
+
+# === 3. パス設定と実行 ===
+VIDEO_PATH="/work/SKIING/chenkaixu/data/drive/videos_split"
+RESULT_PATH="/work/SKIING/chenkaixu/data/sam3d_body_results"
+CKPT_ROOT="/work/SKIING/chenkaixu/code/ckpt/sam-3d-body-dinov3"
+
+# === 2. 启动 debug 节点会话 ===
+echo "🟡 请求 debug 节点会话: ${TIME}"
+qlogin -A "$PROJECT_NAME" -q debug -l elapstim_req=$TIME
+
+# qlogin -A $PROJECT_NAME -q debug -b 2 -l elapstim_req=00:10:00 -T openmpi -v NQSV_MPI_VER=4.1.6/gcc11.4.0-cuda11.8.0 -V
+
