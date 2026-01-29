@@ -67,7 +67,7 @@ def process_single_person(
 
     logger = logging.getLogger(person_id)  # このPerson専用のロガーを取得
     logger.addHandler(handler)
-    logger.propagate = False  # 親（Root）ロガーにログを流さない（混ざるのを防ぐ）
+    # logger.propagate = False  # 親（Root）ロガーにログを流さない（混ざるのを防ぐ）
 
     logger.info(f"==== Starting Process for Person: {person_id} ====")
 
@@ -141,65 +141,6 @@ def gpu_worker(
 
     logger.info(f"🏁 GPU {gpu_id} 所有任务处理完毕")
 
-
-# ---------------------------------------------------------------------
-# Main 入口
-# ---------------------------------------------------------------------
-# @hydra.main(config_path="../configs", config_name="sam3d_body", version_base=None)
-# def main(cfg: DictConfig) -> None:
-#     # 1. 路径准备
-#     out_root = Path(cfg.paths.log_path).resolve()
-#     infer_root = Path(cfg.paths.result_output_path).resolve()
-#     source_root = Path(cfg.paths.video_path).resolve()
-
-#     gpu_ids = cfg.infer.get("gpu", [0, 1])  # 从配置文件读取 GPU 列表，默认 [0, 1]
-
-#     all_person_dirs = sorted([x for x in source_root.iterdir() if x.is_dir()])
-#     if not all_person_dirs:
-#         logger.error(f"未找到数据目录: {source_root}")
-#         return
-
-#     # 2. 自动分组逻辑 (Task Chunking)
-#     # 将所有目录分成 N 份，N 等于 GPU 的数量
-#     num_gpus = len(gpu_ids)
-#     # 使用 np.array_split 可以确保即使除不尽，分配也尽可能均匀
-#     chunks = np.array_split(all_person_dirs, num_gpus)
-
-#     logger.info(f"检测到 {num_gpus} 个 GPU: {gpu_ids}")
-#     for i, gpu_id in enumerate(gpu_ids):
-#         logger.info(f"  - GPU {gpu_id} 分配任务数: {len(chunks[i])}")
-
-#     # 3. 启动并行进程
-#     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
-#     mp.set_start_method("spawn", force=True)
-
-#     processes = []
-#     for i, gpu_id in enumerate(gpu_ids):
-#         person_list = chunks[i].tolist()  # 转回普通列表
-#         if not person_list:
-#             continue
-
-#         p = mp.Process(
-#             target=gpu_worker,
-#             args=(
-#                 gpu_id,
-#                 person_list,
-#                 source_root,
-#                 out_root,
-#                 infer_root,
-#                 cfg_dict,
-#             ),
-#         )
-#         p.start()
-#         processes.append(p)
-
-#     # 4. 等待所有进程完成
-#     for p in processes:
-#         p.join()
-
-#     logger.info("🎉 [SUCCESS] 所有 GPU 任务已圆满完成！")
-
-
 # ---------------------------------------------------------------------
 # Main 入口
 # ---------------------------------------------------------------------
@@ -222,7 +163,12 @@ def main(cfg: DictConfig) -> None:
     total_workers = len(expanded_gpu_ids)
     # ------------------
 
-    all_person_dirs = sorted([x for x in source_root.iterdir() if x.is_dir()])
+    # all_person_dirs = sorted([x for x in source_root.iterdir() if x.is_dir()])
+    all_person_dirs = [] 
+    for x in source_root.iterdir():
+        if x.is_dir() and (int(x.name) in [int(pid) for pid in cfg.infer.person_list] or -1 in cfg.infer.person_list):
+            all_person_dirs.append(x)
+    
     if not all_person_dirs:
         logger.error(f"未找到数据目录: {source_root}")
         return
@@ -232,6 +178,7 @@ def main(cfg: DictConfig) -> None:
 
     logger.info(f"使用 GPU: {gpu_ids} (各 {workers_per_gpu} ワーカー)")
     logger.info(f"総プロセス数: {total_workers}")
+    logger.info(f"総処理人数: {len(all_person_dirs)}")
 
     # 3. 启动并行进程
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)

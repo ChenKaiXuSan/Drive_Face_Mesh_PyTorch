@@ -38,7 +38,8 @@
       "python": "/opt/conda/envs/sam_3d_body/bin/python",
       "console": "integratedTerminal",
       "args": [
-        "infer.gpu=[0,1]",
+        "infer.gpu=[0]",
+        "infer.person_list=[-1]",
       ]
     },
   ]
