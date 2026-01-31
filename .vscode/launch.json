@@ -33,7 +33,7 @@
       "name": "prepare_sam3d_body",
       "type": "debugpy",
       "request": "launch",
-      "module": "SAM3Dbody.main_person_env",
+      "module": "SAM3Dbody.main",
       "cwd": "/workspace/code",
       "python": "/opt/conda/envs/sam_3d_body/bin/python",
       "console": "integratedTerminal",

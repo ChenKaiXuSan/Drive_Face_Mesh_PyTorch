@@ -40,10 +40,10 @@ ID_MAP["14"]="[15]"
 ID_MAP["15"]="[16]"
 ID_MAP["16"]="[17]"
 ID_MAP["17"]="[18]"
-ID_MAP["18"]="[19]"
+# ID_MAP["18"]="[19]" # down ws2
 ID_MAP["19"]="[20]"
-ID_MAP["20"]="[21]"
-ID_MAP["21"]="[24]"
+# ID_MAP["20"]="[21]" # down ccs
+# ID_MAP["21"]="[24]" # down ws2
 
 # 現在のタスク用リストを取得 (PBS_SUBREQNO は 0-21 の値をとる想定)
 PERSON_LIST=${ID_MAP[$PBS_SUBREQNO]}
@@ -56,12 +56,12 @@ VIDEO_PATH="/work/SKIING/chenkaixu/data/drive/videos_split"
 RESULT_PATH="/work/SKIING/chenkaixu/data/drive/sam3d_body_results"
 CKPT_ROOT="/work/SKIING/chenkaixu/code/Drive_Face_Mesh_PyTorch/ckpt/sam-3d-body-dinov3"
 
-python -m SAM3Dbody.main_person_env \
+python -m SAM3Dbody.main \
     paths.video_path=${VIDEO_PATH} \
     paths.result_output_path=${RESULT_PATH} \
     model.root_path=${CKPT_ROOT} \
     infer.gpu="[0]" \
-    infer.workers_per_gpu=4 \
+    infer.workers_per_gpu=7 \
     infer.person_list="${PERSON_LIST}" \
 
 echo "🏁 Node ${PBS_SUBREQNO} finished at: $(date)"
