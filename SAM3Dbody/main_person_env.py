@@ -33,10 +33,7 @@ from omegaconf import DictConfig, OmegaConf
 
 # 假设这些是从你的其他模块导入的
 from .infer import process_frame_list
-from .load import load_data
-
-# --- 常量定义 ---
-REQUIRED_VIEWS = {"front", "left", "right"}
+from .load import load_data, get_annotation_dict
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +52,8 @@ def process_single_person_env(
     person_id = person_env_dir.parent.name
     env_name = person_env_dir.name
     vid_patterns = ["*.mp4", "*.mov", "*.avi", "*.mkv", "*.MP4", "*.MOV"]
+    view_list = cfg.infer.get("views_list", ["front", "left", "right"])
+    annotation_dict = get_annotation_dict(cfg.paths.start_mid_end_path)
 
     # --- 1. Person専用のログ設定 ---
     log_dir = out_root / "person_logs"
@@ -66,7 +65,9 @@ def process_single_person_env(
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     handler.setFormatter(formatter)
 
-    logger = logging.getLogger(f"{person_id}_{env_name}")  # このPerson専用のロガーを取得
+    logger = logging.getLogger(
+        f"{person_id}_{env_name}"
+    )  # このPerson専用のロガーを取得
     logger.addHandler(handler)
     # logger.propagate = False  # 親（Root）ロガーにログを流さない（混ざるのを防ぐ）
 
@@ -78,13 +79,16 @@ def process_single_person_env(
     for pat in vid_patterns:
         for f in person_env_dir.glob(pat):
             stem = f.stem.lower()
-            if stem in REQUIRED_VIEWS:
+            if stem in view_list:
                 view_map[stem] = f.resolve()
 
-    if not all(v in view_map for v in REQUIRED_VIEWS):
+    if not all(v in view_map for v in view_list):
         logger.warning(f"[Skip] {rel_env}: 视角不全 {list(view_map.keys())}")
 
     view_frames: Dict[str, List[np.ndarray]] = load_data(view_map)
+
+    # 获取 start, mid, end 信息
+    start_mid_end_dict = annotation_dict[f"person_{person_id}"][env_name]
 
     for view, frames in view_frames.items():
         logger.info(f"  视角 {view} 处理了 {len(frames)} 帧数据。")
@@ -97,6 +101,7 @@ def process_single_person_env(
             frame_list=frames,
             out_dir=_out_root,
             inference_output_path=_infer_root,
+            start_mid_end_dict=start_mid_end_dict,
             cfg=cfg,
         )
 

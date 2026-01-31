@@ -179,6 +179,7 @@ def process_frame_list(
     frame_list: list,
     out_dir: Path,
     inference_output_path: Path,
+    start_mid_end_dict: dict,
     cfg: DictConfig,
 ):
     """处理单个视频文件的镜头编辑。"""
@@ -190,7 +191,25 @@ def process_frame_list(
     estimator = setup_sam_3d_body(cfg)
     visualizer = setup_visualizer()
 
-    for idx in tqdm(range(len(frame_list)), desc="Processing frames"):
+    # * 根据 start_mid_end_dict 中的start mid信息进行切断frame_list
+    if start_mid_end_dict:
+        start = start_mid_end_dict["start"]
+        mid = start_mid_end_dict["mid"]
+        end = mid
+
+        logger.info(
+            f"  根据 star, mid 信息处理帧数据: start={start}, mid={mid}, 总处理={end - start} 帧。"
+        )
+    else:
+        start = 0
+        end = len(frame_list)
+
+    # sam3d body检测不出来人的时候记录一下
+    none_detected_frames = []
+
+    # 这里需要保持帧号
+    # for idx in tqdm(range(len(frame_list)), desc="Processing frames"):
+    for idx in tqdm(range(start, end), desc="Processing frames"):
         # if idx > 1:
         #     break
 
@@ -205,6 +224,7 @@ def process_frame_list(
 
         if best_person is None:
             logger.warning(f"[Skip] No person detected in frame {idx}.")
+            none_detected_frames.append(idx)
             continue
 
         # 可视化并保存结果
@@ -232,5 +252,15 @@ def process_frame_list(
     torch.cuda.empty_cache()
     del estimator
     del visualizer
+
+    # 保存未检测到人的帧号
+    if none_detected_frames:
+        none_detected_frames_file = inference_output_path / "none_detected_frames.txt"
+        with open(none_detected_frames_file, "w") as f:
+            for frame_idx in none_detected_frames:
+                f.write(f"{frame_idx}\n")
+        logger.info(
+            f"⚠️ 共 {len(none_detected_frames)} 帧未检测到人物，已保存至 {none_detected_frames_file}"
+        )
 
     return out_dir

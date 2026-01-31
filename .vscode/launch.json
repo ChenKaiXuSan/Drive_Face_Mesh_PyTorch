@@ -39,8 +39,9 @@
       "console": "integratedTerminal",
       "args": [
         "infer.gpu=[0,1]",
-        "infer.person_list=[24]",
+        "infer.person_list=[19]",
         "infer.env_list=[all]",
+        "infer.views_list=[front]",
       ]
     },
   ]

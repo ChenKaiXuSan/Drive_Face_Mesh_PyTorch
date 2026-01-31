@@ -10,6 +10,7 @@ paths:
   video_path: /workspace/data/videos_split
   log_path: logs/sam3d-body/${now:%Y-%m-%d}/${now:%H-%M-%S}
   result_output_path: /workspace/data/sam3d_body_results
+  start_mid_end_path: /workspace/data/annotation/split_mid_end/mini.json # 我们不需要推导左右的frame，按照这里面的start和mid来进行推导
 
 # Model
 model:
@@ -24,11 +25,11 @@ model:
 visualize:
   save_focal_length: false
   save_mesh_ply: false
-  save_mesh_overlay: true
-  save_bbox_image: true
+  save_mesh_overlay: false
+  save_bbox_image: false
   save_3d_mesh: false
-  save_3d_keypoints: true
-  save_together: true
+  save_3d_keypoints: false
+  save_together: false
 
 infer:
   conf_thres: 50.0
@@ -38,6 +39,7 @@ infer:
   workers_per_gpu: 2 # 每个 GPU 使用的工作线程数,3090 建议 2
   person_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] # 指定需要处理的人物 ID 列表，-1 表示处理所有人物
   env_list: [all] # 指定需要处理的环境 ID 列表，-1 表示处理所有环境
+  views_list: ["front", "left", "right"] # 指定需要处理的视角, front, left, right
 
 dataset:
   recursive: true
