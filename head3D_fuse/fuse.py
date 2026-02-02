@@ -64,9 +64,7 @@ def _normalize_keypoints(keypoints: Optional[np.ndarray]) -> Optional[np.ndarray
 
 
 def fuse_3view_keypoints(
-    k_front: np.ndarray,
-    k_left: np.ndarray,
-    k_right: np.ndarray,
+    keypoints_by_view: Dict[str, np.ndarray],
     method: str = "median",
     zero_eps: float = 1e-6,
     fill_value: Optional[float] = None,
@@ -74,7 +72,10 @@ def fuse_3view_keypoints(
     """Fuse three-view 3D keypoints by ignoring invalid (near-zero) joints."""
     if fill_value is None:
         fill_value = np.nan
-    stacked = np.stack([k_front, k_left, k_right], axis=0).astype(np.float64)
+    view_list = list(keypoints_by_view.keys())
+    stacked = np.stack(
+        [keypoints_by_view[view] for view in view_list], axis=0
+    ).astype(np.float64)
     finite = np.isfinite(stacked).all(axis=-1)
     nonzero = np.linalg.norm(stacked, axis=-1) >= zero_eps
     valid = finite & nonzero
@@ -194,7 +195,8 @@ def process_single_person_env(
             continue
 
         fused_kpt, fused_mask, n_valid = fuse_3view_keypoints(
-            k_front, k_left, k_right, method=fused_method
+            {"front": k_front, "left": k_left, "right": k_right},
+            method=fused_method,
         )
 
         save_dir = out_root / env_name / "fused"

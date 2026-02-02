@@ -29,6 +29,9 @@ class FrameTriplet:
 def _extract_frame_idx(npz_path: Path) -> Optional[int]:
     stem = npz_path.stem
     # Expected format: "<frame>_sam3d_body.npz"; fallback to trailing numeric tokens.
+    match = re.match(r"^(\d+)_sam3d", stem)
+    if match:
+        return int(match.group(1))
     match = re.match(r"^(\d+)", stem)
     if match:
         return int(match.group(1))
@@ -153,7 +156,7 @@ def compare_npz_files(npz_paths: Dict[str, Path]) -> Optional[dict]:
     }
     frame_idx_values = {val for val in frame_idx_map.values() if val is not None}
     frame_idx_mismatch = frame_idx_map if len(frame_idx_values) > 1 else {}
-    frame_idx = frame_idx_map if frame_idx_mismatch else next(iter(frame_idx_values), None)
+    frame_idx = None if frame_idx_mismatch else next(iter(frame_idx_values), None)
 
     has_missing = any(missing_keys[view] for view in missing_keys)
     if not has_missing and not mismatched_shapes and not frame_idx_mismatch:
@@ -167,8 +170,6 @@ def compare_npz_files(npz_paths: Dict[str, Path]) -> Optional[dict]:
         "npz_paths": {view: str(path) for view, path in npz_paths.items()},
     }
 
-# TODO: 这里先整理三个视角的npz文件
-# TODO： 后续根据annotation_dict进行裁剪，并确认
 def load_SAM3D_results_from_npz(
     person_env_dir: Path, view_list: List[str], annotation_dict: Optional[dict] = None
 ) -> Dict[str, List[np.ndarray]]:
