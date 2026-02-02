@@ -51,7 +51,7 @@ from head3D_fuse.visualization.vis_utils import (
 from mesh_triangulation.save import save_3d_joints
 
 logger = logging.getLogger(__name__)
-PLACEHOLDER_VIS_IMAGE_SIZE = (10, 10)  # img_cv2 is unused; placeholder keeps API stable.
+DUMMY_IMAGE_SIZE = (10, 10)  # img_cv2 is unused; placeholder keeps API stable.
 
 
 def _normalize_keypoints(keypoints: Optional[np.ndarray]) -> Optional[np.ndarray]:
@@ -132,7 +132,7 @@ def _save_fused_visualization(
 ) -> Path:
     save_dir.mkdir(parents=True, exist_ok=True)
     outputs = [{"pred_keypoints_3d": fused_keypoints}]
-    dummy_img = np.zeros((*PLACEHOLDER_VIS_IMAGE_SIZE, 3), dtype=np.uint8)
+    dummy_img = np.zeros((*DUMMY_IMAGE_SIZE, 3), dtype=np.uint8)
     kpt3d_img = visualize_3d_skeleton(
         img_cv2=dummy_img, outputs=outputs, visualizer=visualizer
     )
@@ -175,16 +175,12 @@ def process_single_person_env(
             for view, npz_path in triplet.npz_paths.items()
         }
 
-        k_front = _normalize_keypoints(outputs["front"].get("pred_keypoints_3d"))
-        k_left = _normalize_keypoints(outputs["left"].get("pred_keypoints_3d"))
-        k_right = _normalize_keypoints(outputs["right"].get("pred_keypoints_3d"))
-
-        if k_front is None or k_left is None or k_right is None:
-            missing_views = [
-                view
-                for view, kpt in zip(view_list, (k_front, k_left, k_right))
-                if kpt is None
-            ]
+        keypoints_by_view = {
+            view: _normalize_keypoints(outputs[view].get("pred_keypoints_3d"))
+            for view in view_list
+        }
+        missing_views = [view for view, kpt in keypoints_by_view.items() if kpt is None]
+        if missing_views:
             logger.warning(
                 "Missing pred_keypoints_3d for frame %s in %s/%s (views: %s)",
                 triplet.frame_idx,
@@ -195,7 +191,7 @@ def process_single_person_env(
             continue
 
         fused_kpt, fused_mask, n_valid = fuse_3view_keypoints(
-            {"front": k_front, "left": k_left, "right": k_right},
+            keypoints_by_view,
             method=fused_method,
         )
 
