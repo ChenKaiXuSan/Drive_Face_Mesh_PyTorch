@@ -157,7 +157,13 @@ def _save_view_visualizations(
         logger.warning("Missing frame for view=%s frame=%s", view, frame_idx)
         return
 
+    # Visualization helpers expect a list of outputs, even for a single person.
     outputs_list = [output]
+    save_together = cfg.visualize.get("save_together", False)
+    faces = output.get("faces") if save_together else None
+    if save_together and faces is None:
+        logger.warning("Missing faces for view=%s frame=%s", view, frame_idx)
+        return
     plot_2d = cfg.visualize.get("plot_2d", False)
     if plot_2d:
         save_dir = save_root / view / "2d"
@@ -174,11 +180,7 @@ def _save_view_visualizations(
         )
         cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"), kpt3d_img)
 
-    if cfg.visualize.get("save_together", False):
-        faces = output.get("faces")
-        if faces is None:
-            logger.warning("Missing faces for view=%s frame=%s", view, frame_idx)
-            return
+    if save_together:
         save_dir = save_root / view / "together"
         save_dir.mkdir(parents=True, exist_ok=True)
         together_img = visualize_sample_together(
@@ -204,9 +206,11 @@ def process_single_person_env(
     """处理单个人员的所有环境和视角"""
     person_id = person_env_dir.parent.name
     env_name = person_env_dir.name
-    view_list = cfg.infer.get(
-        "view_list", cfg.infer.get("views_list", ["front", "left", "right"])
-    )
+    view_list = cfg.infer.get("view_list") or cfg.infer.get("views_list") or [
+        "front",
+        "left",
+        "right",
+    ]
     annotation_dict = get_annotation_dict(cfg.paths.start_mid_end_path)
 
     logger.info(f"==== Starting Process for Person: {person_id}, Env: {env_name} ====")
