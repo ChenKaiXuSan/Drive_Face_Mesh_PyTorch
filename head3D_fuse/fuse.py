@@ -157,19 +157,20 @@ def _save_view_visualizations(
         logger.warning("Missing frame for view=%s frame=%s", view, frame_idx)
         return
 
-    outputs = [output]
+    outputs_list = [output]
     plot_2d = cfg.visualize.get("plot_2d", False)
     if plot_2d:
         save_dir = save_root / view / "2d"
         save_dir.mkdir(parents=True, exist_ok=True)
-        results = visualize_2d_results(frame, outputs, skeleton_visualizer)
+        # visualize_2d_results returns a list; the first entry corresponds to the single output.
+        results = visualize_2d_results(frame, outputs_list, skeleton_visualizer)
         cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_2d.png"), results[0])
 
     if cfg.visualize.get("save_3d_keypoints", False):
         save_dir = save_root / view / "3d_kpt"
         save_dir.mkdir(parents=True, exist_ok=True)
         kpt3d_img = visualize_3d_skeleton(
-            img_cv2=frame, outputs=outputs, visualizer=skeleton_visualizer
+            img_cv2=frame, outputs=outputs_list, visualizer=skeleton_visualizer
         )
         cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"), kpt3d_img)
 
@@ -182,7 +183,7 @@ def _save_view_visualizations(
         save_dir.mkdir(parents=True, exist_ok=True)
         together_img = visualize_sample_together(
             img_cv2=frame,
-            outputs=outputs,
+            outputs=outputs_list,
             faces=faces,
             visualizer=skeleton_visualizer,
         )
