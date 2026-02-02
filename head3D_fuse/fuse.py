@@ -151,9 +151,10 @@ def _save_view_visualizations(
     cfg: DictConfig,
     skeleton_visualizer,
 ) -> None:
+    helper_logger = logging.getLogger(__name__)
     frame = output.get("frame")
     if frame is None:
-        logger.warning("Missing frame for view=%s frame=%s", view, frame_idx)
+        helper_logger.warning("Missing frame for view=%s frame=%s", view, frame_idx)
         return
 
     outputs = [output]
@@ -175,7 +176,7 @@ def _save_view_visualizations(
     if cfg.visualize.get("save_together", False):
         faces = output.get("faces")
         if faces is None:
-            logger.warning("Missing faces for view=%s frame=%s", view, frame_idx)
+            helper_logger.warning("Missing faces for view=%s frame=%s", view, frame_idx)
             return
         save_dir = save_root / view / "together"
         save_dir.mkdir(parents=True, exist_ok=True)
