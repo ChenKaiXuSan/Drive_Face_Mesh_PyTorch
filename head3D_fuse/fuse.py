@@ -149,6 +149,7 @@ def _save_view_visualizations(
     view: str,
     frame_idx: int,
     cfg: DictConfig,
+    skeleton_visualizer,
 ) -> None:
     frame = output.get("frame")
     if frame is None:
@@ -160,14 +161,14 @@ def _save_view_visualizations(
     if plot_2d:
         save_dir = save_root / view / "2d"
         save_dir.mkdir(parents=True, exist_ok=True)
-        results = visualize_2d_results(frame, outputs, visualizer)
+        results = visualize_2d_results(frame, outputs, skeleton_visualizer)
         cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_2d.png"), results[0])
 
     if cfg.visualize.get("save_3d_keypoints", False):
         save_dir = save_root / view / "3d_kpt"
         save_dir.mkdir(parents=True, exist_ok=True)
         kpt3d_img = visualize_3d_skeleton(
-            img_cv2=frame, outputs=outputs, visualizer=visualizer
+            img_cv2=frame, outputs=outputs, visualizer=skeleton_visualizer
         )
         cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"), kpt3d_img)
 
@@ -182,7 +183,7 @@ def _save_view_visualizations(
             img_cv2=frame,
             outputs=outputs,
             faces=faces,
-            visualizer=visualizer,
+            visualizer=skeleton_visualizer,
         )
         cv2.imwrite(
             str(save_dir / f"frame_{frame_idx:06d}_together.png"), together_img
@@ -265,6 +266,7 @@ def process_single_person_env(
                 view=view,
                 frame_idx=triplet.frame_idx,
                 cfg=cfg,
+                skeleton_visualizer=visualizer,
             )
 
         if cfg.visualize.get("save_3d_keypoints", False):
