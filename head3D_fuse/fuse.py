@@ -166,7 +166,7 @@ def _save_view_visualizations(
         save_dir.mkdir(parents=True, exist_ok=True)
         # visualize_2d_results returns a list; the first entry corresponds to the single output.
         results = visualize_2d_results(frame, outputs_list, visualizer)
-        if not results:
+        if not results or results[0] is None:
             logger.warning(
                 "2D visualization failed for view=%s frame=%s", view, frame_idx
             )
