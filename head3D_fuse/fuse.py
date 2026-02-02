@@ -19,13 +19,15 @@ HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
-from pathlib import Path
-from omegaconf import DictConfig
-from typing import Dict, List, Optional, Tuple
 import json
 import logging
-import numpy as np
+from pathlib import Path
+from typing import Dict, Optional, Tuple
+
 import cv2
+import numpy as np
+from omegaconf import DictConfig
+
 from head3D_fuse.load import (
     assemble_view_npz_paths,
     compare_npz_files,
@@ -36,7 +38,6 @@ from head3D_fuse.load import (
 from head3D_fuse.mesh_3d_eval import (
     evaluate_face3d_pro,
     export_report,
-    visualize_metrics,
 )
 
 # vis
@@ -140,6 +141,54 @@ def _save_fused_visualization(
     save_path = save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"
     cv2.imwrite(str(save_path), kpt3d_img)
     return save_path
+
+
+def _save_view_visualizations(
+    output: dict,
+    save_root: Path,
+    view: str,
+    frame_idx: int,
+    cfg: DictConfig,
+) -> None:
+    frame = output.get("frame")
+    if frame is None:
+        logger.warning("Missing frame for view=%s frame=%s", view, frame_idx)
+        return
+
+    outputs = [output]
+    plot_2d = cfg.visualize.get("plot_2d", False)
+    if plot_2d:
+        save_dir = save_root / view / "2d"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        results = visualize_2d_results(frame, outputs, visualizer)
+        cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_2d.png"), results[0])
+
+    if cfg.visualize.get("save_3d_keypoints", False):
+        save_dir = save_root / view / "3d_kpt"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        kpt3d_img = visualize_3d_skeleton(
+            img_cv2=frame, outputs=outputs, visualizer=visualizer
+        )
+        cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"), kpt3d_img)
+
+    if cfg.visualize.get("save_together", False):
+        faces = output.get("faces")
+        if faces is None:
+            logger.warning("Missing faces for view=%s frame=%s", view, frame_idx)
+            return
+        save_dir = save_root / view / "together"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        together_img = visualize_sample_together(
+            img_cv2=frame,
+            outputs=outputs,
+            faces=faces,
+            visualizer=visualizer,
+        )
+        cv2.imwrite(
+            str(save_dir / f"frame_{frame_idx:06d}_together.png"), together_img
+        )
+
+
 # ---------------------------------------------------------------------
 # 核心处理逻辑：处理单个人的数据
 # ---------------------------------------------------------------------
@@ -152,7 +201,9 @@ def process_single_person_env(
     """处理单个人员的所有环境和视角"""
     person_id = person_env_dir.parent.name
     env_name = person_env_dir.name
-    view_list = cfg.infer.get("view_list", cfg.infer.get("views_list", ["front", "left", "right"]))
+    view_list = cfg.infer.get(
+        "view_list", cfg.infer.get("views_list", ["front", "left", "right"])
+    )
     annotation_dict = get_annotation_dict(cfg.paths.start_mid_end_path)
 
     logger.info(f"==== Starting Process for Person: {person_id}, Env: {env_name} ====")
@@ -205,6 +256,21 @@ def process_single_person_env(
             n_valid=n_valid,
             npz_paths=triplet.npz_paths,
         )
+
+        if (
+            cfg.visualize.get("plot_2d", False)
+            or cfg.visualize.get("save_3d_keypoints", False)
+            or cfg.visualize.get("save_together", False)
+        ):
+            vis_root = save_dir / "vis"
+            for view in view_list:
+                _save_view_visualizations(
+                    output=outputs[view],
+                    save_root=vis_root,
+                    view=view,
+                    frame_idx=triplet.frame_idx,
+                    cfg=cfg,
+                )
 
         if cfg.visualize.get("save_3d_keypoints", False):
             _save_fused_visualization(
