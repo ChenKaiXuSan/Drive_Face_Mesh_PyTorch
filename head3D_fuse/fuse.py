@@ -170,8 +170,8 @@ def _save_view_visualizations(
             logger.warning(
                 "2D visualization failed for view=%s frame=%s", view, frame_idx
             )
-            return
-        cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_2d.png"), results[0])
+        else:
+            cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_2d.png"), results[0])
 
     if cfg.visualize.get("save_3d_keypoints", False):
         save_dir = save_root / view / "3d_kpt"
