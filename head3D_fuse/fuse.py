@@ -149,7 +149,7 @@ def _save_view_visualizations(
     view: str,
     frame_idx: int,
     cfg: DictConfig,
-    skeleton_visualizer,
+    visualizer,
 ) -> None:
     logger = logging.getLogger(__name__)
     frame = output.get("frame")
@@ -165,14 +165,14 @@ def _save_view_visualizations(
         save_dir = save_root / view / "2d"
         save_dir.mkdir(parents=True, exist_ok=True)
         # visualize_2d_results returns a list; the first entry corresponds to the single output.
-        results = visualize_2d_results(frame, outputs_list, skeleton_visualizer)
+        results = visualize_2d_results(frame, outputs_list, visualizer)
         cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_2d.png"), results[0])
 
     if cfg.visualize.get("save_3d_keypoints", False):
         save_dir = save_root / view / "3d_kpt"
         save_dir.mkdir(parents=True, exist_ok=True)
         kpt3d_img = visualize_3d_skeleton(
-            img_cv2=frame, outputs=outputs_list, visualizer=skeleton_visualizer
+            img_cv2=frame, outputs=outputs_list, visualizer=visualizer
         )
         cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"), kpt3d_img)
 
@@ -187,7 +187,7 @@ def _save_view_visualizations(
             img_cv2=frame,
             outputs=outputs_list,
             faces=faces,
-            visualizer=skeleton_visualizer,
+            visualizer=visualizer,
         )
         cv2.imwrite(
             str(save_dir / f"frame_{frame_idx:06d}_together.png"), together_img
@@ -206,11 +206,11 @@ def process_single_person_env(
     """处理单个人员的所有环境和视角"""
     person_id = person_env_dir.parent.name
     env_name = person_env_dir.name
-    view_list = ["front", "left", "right"]
-    for key in ("view_list", "views_list"):
-        if (candidate := cfg.infer.get(key)) is not None:
-            view_list = candidate
-            break
+    view_list = (
+        cfg.infer.get("view_list")
+        or cfg.infer.get("views_list")
+        or ["front", "left", "right"]
+    )
     annotation_dict = get_annotation_dict(cfg.paths.start_mid_end_path)
 
     logger.info(f"==== Starting Process for Person: {person_id}, Env: {env_name} ====")
@@ -277,7 +277,7 @@ def process_single_person_env(
                 view=view,
                 frame_idx=triplet.frame_idx,
                 cfg=cfg,
-                skeleton_visualizer=visualizer,
+                visualizer=visualizer,
             )
 
         if cfg.visualize.get("save_3d_keypoints", False):
