@@ -185,25 +185,27 @@ def _save_view_visualizations(
                 view,
                 frame_idx,
             )
-            return
-        cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"), kpt3d_img)
+        else:
+            cv2.imwrite(
+                str(save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"), kpt3d_img
+            )
 
     if save_together:
         faces = output.get("faces")
         if faces is None:
             logger.warning("Missing faces for view=%s frame=%s", view, frame_idx)
-            return
-        save_dir = save_root / view / "together"
-        save_dir.mkdir(parents=True, exist_ok=True)
-        together_img = visualize_sample_together(
-            img_cv2=frame,
-            outputs=outputs_list,
-            faces=faces,
-            visualizer=visualizer,
-        )
-        cv2.imwrite(
-            str(save_dir / f"frame_{frame_idx:06d}_together.png"), together_img
-        )
+        else:
+            save_dir = save_root / view / "together"
+            save_dir.mkdir(parents=True, exist_ok=True)
+            together_img = visualize_sample_together(
+                img_cv2=frame,
+                outputs=outputs_list,
+                faces=faces,
+                visualizer=visualizer,
+            )
+            cv2.imwrite(
+                str(save_dir / f"frame_{frame_idx:06d}_together.png"), together_img
+            )
 
 
 # ---------------------------------------------------------------------
