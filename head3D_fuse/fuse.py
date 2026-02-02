@@ -51,7 +51,7 @@ from head3D_fuse.visualization.vis_utils import (
 from mesh_triangulation.save import save_3d_joints
 
 logger = logging.getLogger(__name__)
-DUMMY_IMAGE_SIZE = (10, 10)  # Visualization API requires an image; use a placeholder.
+DUMMY_IMAGE_SIZE = (10, 10)  # Placeholder size; visualize_3d_skeleton only uses it as a canvas.
 
 
 def _normalize_keypoints(keypoints: Optional[np.ndarray]) -> Optional[np.ndarray]:
@@ -98,7 +98,8 @@ def fuse_3view_keypoints(
         fused[fused_mask] = reducer(stacked_slice, axis=0)
     else:
         raise ValueError(
-            f"method must be one of: 'mean', 'median', 'first' (default: median), got '{method}'"
+            "method must be one of: 'mean', 'median', 'first' "
+            f"(default from cfg.infer.fuse_method), got '{method}'"
         )
 
     return fused, fused_mask, n_valid
@@ -151,7 +152,7 @@ def process_single_person_env(
     """处理单个人员的所有环境和视角"""
     person_id = person_env_dir.parent.name
     env_name = person_env_dir.name
-    view_list = cfg.infer.get("views_list", ["front", "left", "right"])
+    view_list = cfg.infer.get("view_list", cfg.infer.get("views_list", ["front", "left", "right"]))
     annotation_dict = get_annotation_dict(cfg.paths.start_mid_end_path)
 
     logger.info(f"==== Starting Process for Person: {person_id}, Env: {env_name} ====")
