@@ -4,11 +4,11 @@ from head3D_fuse.fuse import fuse_3view_keypoints
 
 
 def test_fuse_3view_keypoints_mean():
-    kpt = np.array([[1.0, 2.0, 3.0], [0.0, 0.0, 0.0]])
+    keypoints = np.array([[1.0, 2.0, 3.0], [0.0, 0.0, 0.0]])
     keypoints_by_view = {
-        "front": kpt,
-        "left": kpt * 2,
-        "right": kpt * 3,
+        "front": keypoints,
+        "left": keypoints * 2,
+        "right": keypoints * 3,
     }
 
     fused, fused_mask, n_valid = fuse_3view_keypoints(

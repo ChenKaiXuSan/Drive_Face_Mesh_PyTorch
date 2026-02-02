@@ -85,10 +85,10 @@ def fuse_3view_keypoints(
     fused = np.full(stacked.shape[1:], fill_value, dtype=np.float64)
 
     if method == "first":
-        for j in range(stacked.shape[1]):
-            for v in range(stacked.shape[0]):
-                if valid[v, j]:
-                    fused[j] = stacked[v, j]
+        for joint_idx in range(stacked.shape[1]):
+            for view_idx in range(stacked.shape[0]):
+                if valid[view_idx, joint_idx]:
+                    fused[joint_idx] = stacked[view_idx, joint_idx]
                     break
     elif method in ("mean", "median"):
         reducer = np.nanmean if method == "mean" else np.nanmedian
