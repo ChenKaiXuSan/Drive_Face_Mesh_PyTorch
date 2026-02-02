@@ -51,7 +51,7 @@ from head3D_fuse.visualization.vis_utils import (
 from mesh_triangulation.save import save_3d_joints
 
 logger = logging.getLogger(__name__)
-DUMMY_IMAGE_SIZE = (10, 10)  # img_cv2 is unused; placeholder keeps API stable.
+DUMMY_IMAGE_SIZE = (10, 10)  # Visualization API requires an image; use a placeholder.
 
 
 def _normalize_keypoints(keypoints: Optional[np.ndarray]) -> Optional[np.ndarray]:
@@ -98,7 +98,7 @@ def fuse_3view_keypoints(
         fused[fused_mask] = reducer(stacked_slice, axis=0)
     else:
         raise ValueError(
-            f"method must be one of: 'mean', 'median', 'first', got '{method}'"
+            f"method must be one of: 'mean', 'median', 'first' (default: median), got '{method}'"
         )
 
     return fused, fused_mask, n_valid

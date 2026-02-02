@@ -28,7 +28,7 @@ class FrameTriplet:
 
 def _extract_frame_idx(npz_path: Path) -> Optional[int]:
     stem = npz_path.stem
-    # Expected format: "<frame>_sam3d_body.npz"; fallback to leading digits and trailing numeric tokens.
+    # Expected format: "<frame>_SAM3D_body.npz"; fallback to leading digits and trailing numeric tokens.
     match = re.match(r"^(\d+)_sam3d", stem)
     if match:
         return int(match.group(1))
@@ -142,7 +142,7 @@ def compare_npz_files(npz_paths: Dict[str, Path]) -> Optional[dict]:
     }
 
     mismatched_shapes: Dict[str, Dict[str, Optional[Tuple[int, ...]]]] = {}
-    # "frame_idx" is validated separately; "frame" holds the raw image array.
+    # Validate core geometry fields; "frame_idx" is validated separately.
     keys_to_check = ("pred_keypoints_3d", "pred_keypoints_2d", "pred_vertices", "frame")
     for key in keys_to_check:
         shapes = {}
