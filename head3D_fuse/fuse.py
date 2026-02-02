@@ -206,13 +206,14 @@ def process_single_person_env(
     """处理单个人员的所有环境和视角"""
     person_id = person_env_dir.parent.name
     env_name = person_env_dir.name
-    view_list = None
-    for key in ("view_list", "views_list"):
-        view_list = cfg.infer.get(key)
-        if view_list is not None:
-            break
-    if view_list is None:
-        view_list = ["front", "left", "right"]
+    view_list = next(
+        (
+            cfg.infer.get(key)
+            for key in ("view_list", "views_list")
+            if cfg.infer.get(key) is not None
+        ),
+        ["front", "left", "right"],
+    )
     annotation_dict = get_annotation_dict(cfg.paths.start_mid_end_path)
 
     logger.info(f"==== Starting Process for Person: {person_id}, Env: {env_name} ====")
@@ -270,7 +271,7 @@ def process_single_person_env(
         for view in view_list:
             if view not in outputs:
                 logger.warning(
-                    "Missing output for view=%s frame=%s", view, triplet.frame_idx
+                    f"Missing output for view={view} frame={triplet.frame_idx}"
                 )
                 continue
             _save_view_visualizations(
