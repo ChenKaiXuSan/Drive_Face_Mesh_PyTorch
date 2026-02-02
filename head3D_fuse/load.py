@@ -28,11 +28,12 @@ class FrameTriplet:
 
 def _extract_frame_idx(npz_path: Path) -> Optional[int]:
     stem = npz_path.stem
+    # Priority: leading digits (sam3d frame naming), then trailing numeric tokens.
     match = re.match(r"^(\d+)", stem)
     if match:
         return int(match.group(1))
     parts = stem.split("_")
-    for part in parts:
+    for part in reversed(parts):
         if part.isdigit():
             return int(part)
     matches = re.findall(r"\d+", stem)
@@ -137,7 +138,7 @@ def compare_npz_files(npz_paths: Dict[str, Path]) -> Optional[dict]:
         view: sorted(all_keys - set(output.keys())) for view, output in outputs.items()
     }
 
-    shape_mismatch: Dict[str, Dict[str, Optional[Tuple[int, ...]]]] = {}
+    mismatched_shapes: Dict[str, Dict[str, Optional[Tuple[int, ...]]]] = {}
     keys_to_check = ("pred_keypoints_3d", "pred_keypoints_2d", "pred_vertices", "frame")
     for key in keys_to_check:
         shapes = {}
@@ -145,7 +146,7 @@ def compare_npz_files(npz_paths: Dict[str, Path]) -> Optional[dict]:
             value = output.get(key)
             shapes[view] = value.shape if isinstance(value, np.ndarray) else None
         if len(set(shapes.values())) > 1:
-            shape_mismatch[key] = shapes
+            mismatched_shapes[key] = shapes
 
     frame_idx_map = {
         view: output.get("frame_idx") for view, output in outputs.items()
@@ -154,13 +155,13 @@ def compare_npz_files(npz_paths: Dict[str, Path]) -> Optional[dict]:
     frame_idx_mismatch = frame_idx_map if len(frame_idx_values) > 1 else {}
 
     has_missing = any(missing_keys[view] for view in missing_keys)
-    if not has_missing and not shape_mismatch and not frame_idx_mismatch:
+    if not has_missing and not mismatched_shapes and not frame_idx_mismatch:
         return None
 
     return {
         "frame_idx": next(iter(frame_idx_values), None),
         "missing_keys": missing_keys,
-        "shape_mismatch": shape_mismatch,
+        "shape_mismatch": mismatched_shapes,
         "frame_idx_mismatch": frame_idx_mismatch,
         "npz_paths": {view: str(path) for view, path in npz_paths.items()},
     }

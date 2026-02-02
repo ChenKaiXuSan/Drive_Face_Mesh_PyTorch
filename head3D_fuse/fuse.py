@@ -51,7 +51,7 @@ from head3D_fuse.visualization.vis_utils import (
 from mesh_triangulation.save import save_3d_joints
 
 logger = logging.getLogger(__name__)
-VIS_DUMMY_IMAGE_SIZE = (10, 10)
+VIS_DUMMY_IMAGE_SIZE = (10, 10)  # img_cv2 is unused; placeholder keeps API stable.
 
 
 def _normalize_keypoints(keypoints: Optional[np.ndarray]) -> Optional[np.ndarray]:
@@ -88,10 +88,11 @@ def fuse_3view_keypoints(
                     fused[j] = stacked[v, j]
                     break
     elif method in ("mean", "median"):
-        stacked_copy = stacked.copy()
-        stacked_copy[~valid] = np.nan
         reducer = np.nanmean if method == "mean" else np.nanmedian
-        fused[fused_mask] = reducer(stacked_copy[:, fused_mask, :], axis=0)
+        stacked_slice = stacked[:, fused_mask, :]
+        valid_slice = valid[:, fused_mask]
+        stacked_slice[~valid_slice] = np.nan
+        fused[fused_mask] = reducer(stacked_slice, axis=0)
     else:
         raise ValueError("method must be one of: 'mean', 'median', 'first'")
 
@@ -174,11 +175,19 @@ def process_single_person_env(
         k_right = _normalize_keypoints(outputs["right"].get("pred_keypoints_3d"))
 
         if k_front is None or k_left is None or k_right is None:
+            missing_views = [
+                view
+                for view, kpt in zip(
+                    ("front", "left", "right"), (k_front, k_left, k_right)
+                )
+                if kpt is None
+            ]
             logger.warning(
-                "Missing pred_keypoints_3d for frame %s in %s/%s",
+                "Missing pred_keypoints_3d for frame %s in %s/%s (views: %s)",
                 triplet.frame_idx,
                 person_id,
                 env_name,
+                ",".join(missing_views),
             )
             continue
 
