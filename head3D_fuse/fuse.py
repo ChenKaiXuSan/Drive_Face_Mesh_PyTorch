@@ -25,6 +25,7 @@ from typing import Dict, List, Optional, Tuple
 import json
 import logging
 import numpy as np
+import cv2
 from head3D_fuse.load import (
     assemble_view_npz_paths,
     compare_npz_files,
@@ -50,6 +51,7 @@ from head3D_fuse.visualization.vis_utils import (
 from mesh_triangulation.save import save_3d_joints
 
 logger = logging.getLogger(__name__)
+VIS_DUMMY_IMAGE_SIZE = (10, 10)
 
 
 def _normalize_keypoints(keypoints: Optional[np.ndarray]) -> Optional[np.ndarray]:
@@ -124,13 +126,11 @@ def _save_fused_visualization(
 ) -> Path:
     save_dir.mkdir(parents=True, exist_ok=True)
     outputs = [{"pred_keypoints_3d": fused_keypoints}]
-    dummy_img = np.zeros((10, 10, 3), dtype=np.uint8)
+    dummy_img = np.zeros((*VIS_DUMMY_IMAGE_SIZE, 3), dtype=np.uint8)
     kpt3d_img = visualize_3d_skeleton(
         img_cv2=dummy_img, outputs=outputs, visualizer=visualizer
     )
     save_path = save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"
-    import cv2
-
     cv2.imwrite(str(save_path), kpt3d_img)
     return save_path
 # ---------------------------------------------------------------------

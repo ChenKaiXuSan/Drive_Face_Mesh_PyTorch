@@ -28,6 +28,9 @@ class FrameTriplet:
 
 def _extract_frame_idx(npz_path: Path) -> Optional[int]:
     stem = npz_path.stem
+    match = re.match(r"^(\d+)", stem)
+    if match:
+        return int(match.group(1))
     parts = stem.split("_")
     for part in parts:
         if part.isdigit():
@@ -75,14 +78,13 @@ def assemble_view_npz_paths(
     start_frame, end_frame = _lookup_annotation_range(
         annotation_dict, person_env_dir.parent.name, person_env_dir.name
     )
-    if start_frame is not None or end_frame is not None:
-        for view, frame_map in view_frames.items():
-            view_frames[view] = {
-                frame_idx: npz_path
-                for frame_idx, npz_path in frame_map.items()
-                if (start_frame is None or frame_idx >= start_frame)
-                and (end_frame is None or frame_idx <= end_frame)
-            }
+    for view, frame_map in view_frames.items():
+        view_frames[view] = {
+            frame_idx: npz_path
+            for frame_idx, npz_path in frame_map.items()
+            if (start_frame is None or frame_idx >= start_frame)
+            and (end_frame is None or frame_idx <= end_frame)
+        }
 
     if view_frames:
         common_frames = set.intersection(
