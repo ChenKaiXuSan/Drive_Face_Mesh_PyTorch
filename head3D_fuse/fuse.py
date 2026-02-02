@@ -166,6 +166,11 @@ def _save_view_visualizations(
         save_dir.mkdir(parents=True, exist_ok=True)
         # visualize_2d_results returns a list; the first entry corresponds to the single output.
         results = visualize_2d_results(frame, outputs_list, visualizer)
+        if not results:
+            logger.warning(
+                "2D visualization failed for view=%s frame=%s", view, frame_idx
+            )
+            return
         cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_2d.png"), results[0])
 
     if cfg.visualize.get("save_3d_keypoints", False):
@@ -174,6 +179,13 @@ def _save_view_visualizations(
         kpt3d_img = visualize_3d_skeleton(
             img_cv2=frame, outputs=outputs_list, visualizer=visualizer
         )
+        if kpt3d_img is None:
+            logger.warning(
+                "3D keypoint visualization failed for view=%s frame=%s",
+                view,
+                frame_idx,
+            )
+            return
         cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"), kpt3d_img)
 
     if save_together:
@@ -206,11 +218,11 @@ def process_single_person_env(
     """处理单个人员的所有环境和视角"""
     person_id = person_env_dir.parent.name
     env_name = person_env_dir.name
-    view_list = (
-        cfg.infer.get("view_list")
-        or cfg.infer.get("views_list")
-        or ["front", "left", "right"]
-    )
+    view_list = cfg.infer.get("view_list")
+    if view_list is None:
+        view_list = cfg.infer.get("views_list")
+    if view_list is None:
+        view_list = ["front", "left", "right"]
     annotation_dict = get_annotation_dict(cfg.paths.start_mid_end_path)
 
     logger.info(f"==== Starting Process for Person: {person_id}, Env: {env_name} ====")
