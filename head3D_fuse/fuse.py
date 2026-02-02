@@ -257,20 +257,15 @@ def process_single_person_env(
             npz_paths=triplet.npz_paths,
         )
 
-        if (
-            cfg.visualize.get("plot_2d", False)
-            or cfg.visualize.get("save_3d_keypoints", False)
-            or cfg.visualize.get("save_together", False)
-        ):
-            vis_root = save_dir / "vis"
-            for view in view_list:
-                _save_view_visualizations(
-                    output=outputs[view],
-                    save_root=vis_root,
-                    view=view,
-                    frame_idx=triplet.frame_idx,
-                    cfg=cfg,
-                )
+        vis_root = save_dir / "vis"
+        for view in view_list:
+            _save_view_visualizations(
+                output=outputs[view],
+                save_root=vis_root,
+                view=view,
+                frame_idx=triplet.frame_idx,
+                cfg=cfg,
+            )
 
         if cfg.visualize.get("save_3d_keypoints", False):
             _save_fused_visualization(
