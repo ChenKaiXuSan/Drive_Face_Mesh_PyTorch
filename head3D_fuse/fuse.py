@@ -151,10 +151,10 @@ def _save_view_visualizations(
     cfg: DictConfig,
     skeleton_visualizer,
 ) -> None:
-    helper_logger = logging.getLogger(__name__)
+    logger = logging.getLogger(__name__)
     frame = output.get("frame")
     if frame is None:
-        helper_logger.warning("Missing frame for view=%s frame=%s", view, frame_idx)
+        logger.warning("Missing frame for view=%s frame=%s", view, frame_idx)
         return
 
     outputs = [output]
@@ -176,7 +176,7 @@ def _save_view_visualizations(
     if cfg.visualize.get("save_together", False):
         faces = output.get("faces")
         if faces is None:
-            helper_logger.warning("Missing faces for view=%s frame=%s", view, frame_idx)
+            logger.warning("Missing faces for view=%s frame=%s", view, frame_idx)
             return
         save_dir = save_root / view / "together"
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -261,6 +261,11 @@ def process_single_person_env(
 
         vis_root = save_dir / "vis"
         for view in view_list:
+            if view not in outputs:
+                logger.warning(
+                    "Missing output for view=%s frame=%s", view, triplet.frame_idx
+                )
+                continue
             _save_view_visualizations(
                 output=outputs[view],
                 save_root=vis_root,
