@@ -21,9 +21,16 @@ Date      	By	Comments
 """
 from pathlib import Path
 from omegaconf import DictConfig
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
+import json
 import logging
-from head3D_fuse.load import load_SAM3D_results_from_npz, get_annotation_dict
+import numpy as np
+from head3D_fuse.load import (
+    assemble_view_npz_paths,
+    compare_npz_files,
+    get_annotation_dict,
+    load_npz_output,
+)
 
 from head3D_fuse.mesh_3d_eval import (
     evaluate_face3d_pro,
@@ -33,14 +40,99 @@ from head3D_fuse.mesh_3d_eval import (
 
 # vis
 from head3D_fuse.visualization.vis_utils import (
-    visualize_sample_together,
     visualize_2d_results,
+    visualize_sample_together,
+    visualize_3d_skeleton,
+    visualizer,
 )
 
 # save
 from mesh_triangulation.save import save_3d_joints
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_keypoints(keypoints: Optional[np.ndarray]) -> Optional[np.ndarray]:
+    if keypoints is None:
+        return None
+    keypoints = np.asarray(keypoints)
+    if keypoints.ndim == 3 and keypoints.shape[0] >= 1:
+        return keypoints[0]
+    return keypoints
+
+
+def fuse_3view_keypoints(
+    k_front: np.ndarray,
+    k_left: np.ndarray,
+    k_right: np.ndarray,
+    method: str = "median",
+    zero_eps: float = 1e-6,
+    fill_value: float = np.nan,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Fuse three-view 3D keypoints by ignoring invalid (near-zero) joints."""
+    stacked = np.stack([k_front, k_left, k_right], axis=0).astype(np.float64)
+    finite = np.isfinite(stacked).all(axis=-1)
+    nonzero = np.linalg.norm(stacked, axis=-1) >= zero_eps
+    valid = finite & nonzero
+
+    fused_mask = valid.any(axis=0)
+    n_valid = valid.sum(axis=0).astype(np.int64)
+    fused = np.full(stacked.shape[1:], fill_value, dtype=np.float64)
+
+    if method == "first":
+        for j in range(stacked.shape[1]):
+            for v in range(stacked.shape[0]):
+                if valid[v, j]:
+                    fused[j] = stacked[v, j]
+                    break
+    elif method in ("mean", "median"):
+        stacked_copy = stacked.copy()
+        stacked_copy[~valid] = np.nan
+        reducer = np.nanmean if method == "mean" else np.nanmedian
+        fused[fused_mask] = reducer(stacked_copy[:, fused_mask, :], axis=0)
+    else:
+        raise ValueError("method must be one of: 'mean', 'median', 'first'")
+
+    return fused, fused_mask, n_valid
+
+
+def _save_fused_keypoints(
+    save_dir: Path,
+    frame_idx: int,
+    fused_keypoints: np.ndarray,
+    fused_mask: np.ndarray,
+    n_valid: np.ndarray,
+    npz_paths: Dict[str, Path],
+) -> Path:
+    save_dir.mkdir(parents=True, exist_ok=True)
+    save_path = save_dir / f"frame_{frame_idx:06d}_fused.npy"
+    payload = {
+        "frame_idx": frame_idx,
+        "fused_keypoints_3d": fused_keypoints,
+        "fused_mask": fused_mask,
+        "valid_views": n_valid,
+        "npz_paths": {view: str(path) for view, path in npz_paths.items()},
+    }
+    np.save(save_path, payload)
+    return save_path
+
+
+def _save_fused_visualization(
+    save_dir: Path,
+    frame_idx: int,
+    fused_keypoints: np.ndarray,
+) -> Path:
+    save_dir.mkdir(parents=True, exist_ok=True)
+    outputs = [{"pred_keypoints_3d": fused_keypoints}]
+    dummy_img = np.zeros((10, 10, 3), dtype=np.uint8)
+    kpt3d_img = visualize_3d_skeleton(
+        img_cv2=dummy_img, outputs=outputs, visualizer=visualizer
+    )
+    save_path = save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"
+    import cv2
+
+    cv2.imwrite(str(save_path), kpt3d_img)
+    return save_path
 # ---------------------------------------------------------------------
 # 核心处理逻辑：处理单个人的数据
 # ---------------------------------------------------------------------
@@ -58,25 +150,67 @@ def process_single_person_env(
 
     logger.info(f"==== Starting Process for Person: {person_id}, Env: {env_name} ====")
 
-    view_frames: Dict[str, List[np.ndarray]] = load_SAM3D_results_from_npz(person_env_dir, view_list, annotation_dict)
+    frame_triplets, report = assemble_view_npz_paths(
+        person_env_dir, view_list, annotation_dict
+    )
+    if not frame_triplets:
+        logger.warning(f"No aligned frames found for {person_id}/{env_name}")
+        return
 
-    # 获取 start, mid, end 信息
-    start_mid_end_dict = annotation_dict[f"person_{person_id}"][env_name]
+    diff_reports = []
+    fused_method = cfg.infer.get("fuse_method", "median")
+    for triplet in frame_triplets:
+        diff = compare_npz_files(triplet.npz_paths)
+        if diff:
+            diff_reports.append(diff)
 
-    for view, frames in view_frames.items():
-        logger.info(f"  视角 {view} 处理了 {len(frames)} 帧数据。")
-        _out_root = out_root / env_name / view
-        _out_root.mkdir(parents=True, exist_ok=True)
-        _infer_root = infer_root / env_name / view
-        _infer_root.mkdir(parents=True, exist_ok=True)
+        outputs = {
+            view: load_npz_output(npz_path)
+            for view, npz_path in triplet.npz_paths.items()
+        }
 
-        process_one_frame_list(
-            frame_list=frames,
-            out_dir=_out_root,
-            inference_output_path=_infer_root,
-            start_mid_end_dict=start_mid_end_dict,
-            cfg=cfg,
+        k_front = _normalize_keypoints(outputs["front"].get("pred_keypoints_3d"))
+        k_left = _normalize_keypoints(outputs["left"].get("pred_keypoints_3d"))
+        k_right = _normalize_keypoints(outputs["right"].get("pred_keypoints_3d"))
+
+        if k_front is None or k_left is None or k_right is None:
+            logger.warning(
+                "Missing pred_keypoints_3d for frame %s in %s/%s",
+                triplet.frame_idx,
+                person_id,
+                env_name,
+            )
+            continue
+
+        fused_kpt, fused_mask, n_valid = fuse_3view_keypoints(
+            k_front, k_left, k_right, method=fused_method
         )
+
+        save_dir = out_root / env_name / "fused"
+        _save_fused_keypoints(
+            save_dir=save_dir,
+            frame_idx=triplet.frame_idx,
+            fused_keypoints=fused_kpt,
+            fused_mask=fused_mask,
+            n_valid=n_valid,
+            npz_paths=triplet.npz_paths,
+        )
+
+        if cfg.visualize.get("save_3d_keypoints", False):
+            _save_fused_visualization(
+                save_dir=save_dir / "vis",
+                frame_idx=triplet.frame_idx,
+                fused_keypoints=fused_kpt,
+            )
+
+    if diff_reports:
+        diff_path = out_root / env_name / "npz_diff_report.json"
+        diff_path.parent.mkdir(parents=True, exist_ok=True)
+        with diff_path.open("w", encoding="utf-8") as f:
+            json.dump(diff_reports, f, ensure_ascii=False, indent=2)
+        logger.info("Saved npz diff report to %s", diff_path)
+    else:
+        logger.info("No npz differences found for %s/%s", person_id, env_name)
 
 
 def detail_to_txt(detail: dict, save_path: Path):
