@@ -28,7 +28,7 @@ class FrameTriplet:
 
 def _extract_frame_idx(npz_path: Path) -> Optional[int]:
     stem = npz_path.stem
-    # Priority: leading digits (sam3d frame naming), then trailing numeric tokens.
+    # Expected format: "<frame>_sam3d_body.npz"; fallback to trailing numeric tokens.
     match = re.match(r"^(\d+)", stem)
     if match:
         return int(match.group(1))
@@ -153,13 +153,14 @@ def compare_npz_files(npz_paths: Dict[str, Path]) -> Optional[dict]:
     }
     frame_idx_values = {val for val in frame_idx_map.values() if val is not None}
     frame_idx_mismatch = frame_idx_map if len(frame_idx_values) > 1 else {}
+    frame_idx = frame_idx_map if frame_idx_mismatch else next(iter(frame_idx_values), None)
 
     has_missing = any(missing_keys[view] for view in missing_keys)
     if not has_missing and not mismatched_shapes and not frame_idx_mismatch:
         return None
 
     return {
-        "frame_idx": next(iter(frame_idx_values), None),
+        "frame_idx": frame_idx,
         "missing_keys": missing_keys,
         "shape_mismatch": mismatched_shapes,
         "frame_idx_mismatch": frame_idx_mismatch,

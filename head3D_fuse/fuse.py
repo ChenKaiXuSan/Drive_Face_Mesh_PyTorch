@@ -51,7 +51,7 @@ from head3D_fuse.visualization.vis_utils import (
 from mesh_triangulation.save import save_3d_joints
 
 logger = logging.getLogger(__name__)
-VIS_DUMMY_IMAGE_SIZE = (10, 10)  # img_cv2 is unused; placeholder keeps API stable.
+PLACEHOLDER_VIS_IMAGE_SIZE = (10, 10)  # img_cv2 is unused; placeholder keeps API stable.
 
 
 def _normalize_keypoints(keypoints: Optional[np.ndarray]) -> Optional[np.ndarray]:
@@ -69,9 +69,11 @@ def fuse_3view_keypoints(
     k_right: np.ndarray,
     method: str = "median",
     zero_eps: float = 1e-6,
-    fill_value: float = np.nan,
+    fill_value: Optional[float] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Fuse three-view 3D keypoints by ignoring invalid (near-zero) joints."""
+    if fill_value is None:
+        fill_value = np.nan
     stacked = np.stack([k_front, k_left, k_right], axis=0).astype(np.float64)
     finite = np.isfinite(stacked).all(axis=-1)
     nonzero = np.linalg.norm(stacked, axis=-1) >= zero_eps
@@ -94,7 +96,9 @@ def fuse_3view_keypoints(
         stacked_slice[~valid_slice] = np.nan
         fused[fused_mask] = reducer(stacked_slice, axis=0)
     else:
-        raise ValueError("method must be one of: 'mean', 'median', 'first'")
+        raise ValueError(
+            f"method must be one of: 'mean', 'median', 'first', got '{method}'"
+        )
 
     return fused, fused_mask, n_valid
 
@@ -127,7 +131,7 @@ def _save_fused_visualization(
 ) -> Path:
     save_dir.mkdir(parents=True, exist_ok=True)
     outputs = [{"pred_keypoints_3d": fused_keypoints}]
-    dummy_img = np.zeros((*VIS_DUMMY_IMAGE_SIZE, 3), dtype=np.uint8)
+    dummy_img = np.zeros((*PLACEHOLDER_VIS_IMAGE_SIZE, 3), dtype=np.uint8)
     kpt3d_img = visualize_3d_skeleton(
         img_cv2=dummy_img, outputs=outputs, visualizer=visualizer
     )
@@ -177,9 +181,7 @@ def process_single_person_env(
         if k_front is None or k_left is None or k_right is None:
             missing_views = [
                 view
-                for view, kpt in zip(
-                    ("front", "left", "right"), (k_front, k_left, k_right)
-                )
+                for view, kpt in zip(view_list, (k_front, k_left, k_right))
                 if kpt is None
             ]
             logger.warning(
