@@ -44,5 +44,19 @@
         "infer.views_list=[front]",
       ]
     },
+    {
+      "name": "head3d_fuse",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "head3D_fuse.main",
+      "cwd": "/workspace/code",
+      "python": "/opt/conda/envs/sam_3d_body/bin/python",
+      "console": "integratedTerminal",
+      "args": [
+        "infer.workers=1",
+        "infer.person_list=[01]",
+        "infer.env_list=[all]",
+      ]
+    }
   ]
 }
