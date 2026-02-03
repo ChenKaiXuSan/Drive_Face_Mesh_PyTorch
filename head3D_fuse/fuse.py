@@ -47,6 +47,7 @@ from head3D_fuse.save import _save_fused_keypoints
 
 logger = logging.getLogger(__name__)
 MIN_POINTS_FOR_ALIGNMENT = 3
+VALID_ALIGNMENT_METHODS = ("none", "procrustes", "procrustes_trimmed")
 
 
 def _normalize_keypoints(keypoints: Optional[np.ndarray]) -> Optional[np.ndarray]:
@@ -136,8 +137,9 @@ def _select_trimmed_inliers(
     n_valid = valid_idx.size
     if n_valid == 0:
         return valid_mask
-    n_keep = max(
-        MIN_POINTS_FOR_ALIGNMENT, int(np.ceil((1.0 - trim_ratio) * n_valid))
+    n_keep = min(
+        n_valid,
+        max(MIN_POINTS_FOR_ALIGNMENT, int(np.ceil((1.0 - trim_ratio) * n_valid))),
     )
     order = np.argsort(residuals[valid_idx])
     keep_idx = valid_idx[order[:n_keep]]
@@ -270,9 +272,9 @@ def fuse_3view_keypoints(
     """
     if fill_value is None:
         fill_value = np.nan
-    if alignment_method not in ("none", "procrustes", "procrustes_trimmed"):
+    if alignment_method not in VALID_ALIGNMENT_METHODS:
         raise ValueError(
-            "alignment_method must be 'none', 'procrustes', or 'procrustes_trimmed', "
+            f"alignment_method must be one of {VALID_ALIGNMENT_METHODS}, "
             f"got '{alignment_method}'"
         )
     view_list = list(keypoints_by_view.keys())
