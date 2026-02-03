@@ -12,16 +12,15 @@ import logging
 import multiprocessing as mp
 import os
 from pathlib import Path
-
 from typing import List
+
 import hydra
 import numpy as np
 from omegaconf import DictConfig, OmegaConf
 
-logger = logging.getLogger(__name__)
-
-
 from head3D_fuse.fuse import process_single_person_env
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------
@@ -53,7 +52,6 @@ def _worker(
 
 @hydra.main(version_base=None, config_path="../configs", config_name="head3d_fuse")
 def main(cfg: DictConfig) -> None:
-
     # 1. 経路準備
     log_root = Path(cfg.log_path).resolve()
     infer_root = Path(cfg.paths.result_output_path).resolve()
@@ -77,7 +75,6 @@ def main(cfg: DictConfig) -> None:
         # Person ID によるフィルタリング
         current_p_id = int(p_dir.name)
         if current_p_id in target_person_ids or -1 in target_person_ids:
-
             # Env フォルダをループ
             for env_dir in sorted(p_dir.iterdir()):
                 if not env_dir.is_dir():
@@ -134,6 +131,5 @@ def main(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
-
     os.environ["HYDRA_FULL_ERROR"] = "1"
     main()

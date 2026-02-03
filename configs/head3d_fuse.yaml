@@ -19,8 +19,7 @@ visualize:
   save_mesh_overlay: false
   save_bbox_image: false
   save_3d_mesh: false
-  save_3d_keypoints: false
-  save_together: false
+  save_3d_keypoints: true
 
 infer:
   num_inference_steps: 4

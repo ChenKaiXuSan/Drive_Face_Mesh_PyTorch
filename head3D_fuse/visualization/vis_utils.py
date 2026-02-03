@@ -24,6 +24,8 @@ import json
 import logging
 import os
 from typing import Any, Dict, List, Optional
+from pathlib import Path
+from omegaconf import DictConfig
 
 import cv2
 import matplotlib.pyplot as plt
@@ -34,79 +36,16 @@ from head3D_fuse.visualization.renderer import Renderer
 from head3D_fuse.visualization.skeleton_visualizer import SkeletonVisualizer
 
 logger = logging.getLogger(__name__)
+DUMMY_IMAGE_SIZE = (
+    10,
+    10,
+)  # Placeholder size; visualize_3d_skeleton only uses it as a canvas.
 
 
 LIGHT_BLUE = (0.65098039, 0.74117647, 0.85882353)
 
 visualizer = SkeletonVisualizer(line_width=2, radius=5)
 visualizer.set_pose_meta(mhr70_pose_info)
-
-
-def visualize_sample_together(img_cv2, outputs, faces, visualizer: SkeletonVisualizer):
-    # Render everything together
-    img_keypoints = img_cv2.copy()
-    img_mesh = img_cv2.copy()
-
-    # First, sort by depth, furthest to closest
-    all_depths = np.stack([tmp["pred_cam_t"] for tmp in outputs], axis=0)[:, 2]
-    outputs_sorted = [outputs[idx] for idx in np.argsort(-all_depths)]
-
-    # Then, draw all keypoints.
-    for pid, person_output in enumerate(outputs_sorted):
-        keypoints_2d = person_output["pred_keypoints_2d"]
-        keypoints_2d = np.concatenate(
-            [keypoints_2d, np.ones((keypoints_2d.shape[0], 1))], axis=-1
-        )
-        img_keypoints = visualizer.draw_skeleton(img_keypoints, keypoints_2d)
-
-    # Then, put all meshes together as one super mesh
-    all_pred_vertices = []
-    all_faces = []
-    for pid, person_output in enumerate(outputs_sorted):
-        all_pred_vertices.append(
-            person_output["pred_vertices"] + person_output["pred_cam_t"]
-        )
-        all_faces.append(faces + len(person_output["pred_vertices"]) * pid)
-    all_pred_vertices = np.concatenate(all_pred_vertices, axis=0)
-    all_faces = np.concatenate(all_faces, axis=0)
-
-    # Pull out a fake translation; take the closest two
-    fake_pred_cam_t = (
-        np.max(all_pred_vertices[-2 * 18439 :], axis=0)
-        + np.min(all_pred_vertices[-2 * 18439 :], axis=0)
-    ) / 2
-    all_pred_vertices = all_pred_vertices - fake_pred_cam_t
-
-    # Render front view
-    renderer = Renderer(focal_length=person_output["focal_length"], faces=all_faces)
-    img_mesh = (
-        renderer(
-            all_pred_vertices,
-            fake_pred_cam_t,
-            img_mesh,
-            mesh_base_color=LIGHT_BLUE,
-            scene_bg_color=(1, 1, 1),
-        )
-        * 255
-    )
-
-    # Render side view
-    white_img = np.ones_like(img_cv2) * 255
-    img_mesh_side = (
-        renderer(
-            all_pred_vertices,
-            fake_pred_cam_t,
-            white_img,
-            mesh_base_color=LIGHT_BLUE,
-            scene_bg_color=(1, 1, 1),
-            side_view=True,
-        )
-        * 255
-    )
-
-    cur_img = np.concatenate([img_cv2, img_keypoints, img_mesh, img_mesh_side], axis=1)
-
-    return cur_img
 
 
 def visualize_2d_results(
@@ -314,127 +253,62 @@ def visualize_3d_skeleton(
     plt.close(fig)
     return img_3d
 
+def _save_view_visualizations(
+    output: dict,
+    save_root: Path,
+    view: str,
+    frame_idx: int,
+    cfg: DictConfig,
+    visualizer,
+) -> None:
+    logger = logging.getLogger(__name__)
+    frame = output.get("frame")
+    if frame is None:
+        logger.warning("Missing frame for view=%s frame=%s", view, frame_idx)
+        return
 
-def vis_results(
-    img_cv2: np.ndarray,
-    outputs: List[Dict[str, Any]],
-    faces: np.ndarray,
-    save_dir: str,
-    image_name: str,
-    visualizer: SkeletonVisualizer,
-    cfg: Optional[Dict[str, Any]] = None,
-):
-    """Save 3D mesh results to files and return PLY file paths"""
-
-    os.makedirs(save_dir, exist_ok=True)
-
-    img_cv2 = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
-
-    # Save focal length
-    if outputs and cfg.get("save_focal_length", False):
-        focal_length_data = {"focal_length": float(outputs[0]["focal_length"])}
-        focal_length_path = os.path.join(save_dir, f"{image_name}_focal_length.json")
-        with open(focal_length_path, "w") as f:
-            json.dump(focal_length_data, f, indent=2)
-        logger.info(f"Saved focal length: {focal_length_path}")
-
-    for pid, person_output in enumerate(outputs):
-        # Create renderer for this person
-        renderer = Renderer(focal_length=person_output["focal_length"], faces=faces)
-
-        # Store individual mesh
-        if cfg.get("save_mesh_ply", False):
-            tmesh = renderer.vertices_to_trimesh(
-                person_output["pred_vertices"], person_output["pred_cam_t"], LIGHT_BLUE
+    # Visualization helpers expect a list of outputs, even for a single person.
+    outputs_list = [output]
+    plot_2d = cfg.visualize.get("plot_2d", False)
+    save_together = cfg.visualize.get("save_together", False)
+    if plot_2d:
+        save_dir = save_root / view / "2d"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        # visualize_2d_results returns a list; the first entry corresponds to the single output.
+        results = visualize_2d_results(frame, outputs_list, visualizer)
+        if not results or results[0] is None:
+            logger.warning(
+                "2D visualization failed for view=%s frame=%s", view, frame_idx
             )
-            mesh_filename = f"{image_name}_mesh_{pid:03d}.ply"
-            mesh_path = os.path.join(save_dir, mesh_filename)
-            tmesh.export(mesh_path)
+        else:
+            cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_2d.png"), results[0])
 
-            logger.info(f"Saved mesh ply file: {mesh_path}")
+    if cfg.visualize.get("save_3d_keypoints", False):
+        save_dir = save_root / view / "3d_kpt"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        kpt3d_img = visualize_3d_skeleton(
+            img_cv2=frame, outputs=outputs_list, visualizer=visualizer
+        )
+        if kpt3d_img is None:
+            logger.warning(
+                "3D keypoint visualization failed for view=%s frame=%s",
+                view,
+                frame_idx,
+            )
+        else:
+            cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"), kpt3d_img)
 
-        # Save individual overlay image
-        if cfg.get("save_mesh_overlay", False):
-            img_mesh_overlay = (
-                renderer(
-                    person_output["pred_vertices"],
-                    person_output["pred_cam_t"],
-                    img_cv2.copy(),
-                    mesh_base_color=LIGHT_BLUE,
-                    scene_bg_color=(1, 1, 1),
-                )
-                * 255
-            ).astype(np.uint8)
-
-            overlay_filename = f"{image_name}_overlay_{pid:03d}.png"
-            cv2.imwrite(os.path.join(save_dir, overlay_filename), img_mesh_overlay)
-            logger.info(f"Saved overlay: {os.path.join(save_dir, overlay_filename)}")
-
-        # Save bbox image
-        if cfg.get("save_bbox_image", False):
-            img_bbox = img_cv2.copy()
-            bbox = person_output["bbox"]
-            img_bbox = cv2.rectangle(
-                img_bbox,
-                (int(bbox[0]), int(bbox[1])),
-                (int(bbox[2]), int(bbox[3])),
-                (0, 255, 0),
-                4,
-            )
-            bbox_filename = f"{image_name}_bbox_{pid:03d}.png"
-            cv2.imwrite(os.path.join(save_dir, bbox_filename), img_bbox)
-            logger.info(f"Saved bbox: {os.path.join(save_dir, bbox_filename)}")
-
-        # 2D 结果可视化
-        if cfg.get("plot_2d", False):
-            vis_results = visualize_2d_results(img_cv2, outputs, visualizer)
-            cv2.imwrite(
-                os.path.join(save_dir, f"{image_name}_2d_visualization.png"),
-                vis_results[pid],
-            )
-            logger.info(
-                f"Saved 2D visualization: {os.path.join(save_dir, f'{image_name}_2d_visualization.png')}"
-            )
-
-        # 3D 网格可视化
-        if cfg.get("save_3d_mesh", False):
-            mesh_results = visualize_3d_mesh(img_cv2, outputs, faces)
-            # Display results
-
-            cv2.imwrite(
-                os.path.join(save_dir, f"{image_name}_3d_mesh_visualization_{pid}.png"),
-                mesh_results[pid],
-            )
-
-            logger.info(
-                f"Saved 3D mesh visualization: {os.path.join(save_dir, f'{image_name}_3d_mesh_visualization_{pid}.png')}"
-            )
-
-        # 3D kpt可视化
-        if cfg.get("save_3d_keypoints", False):
-            kpt3d_img = visualize_3d_skeleton(
-                img_cv2=img_cv2.copy(), outputs=outputs, visualizer=visualizer
-            )
-            cv2.imwrite(
-                os.path.join(save_dir, f"{image_name}_3d_kpt_visualization_{pid}.png"),
-                kpt3d_img,
-            )
-            logger.info(
-                f"Saved 3D keypoint visualization: {os.path.join(save_dir, f'{image_name}_3d_kpt_visualization_{pid}.png')}"
-            )
-
-        # 综合可视化
-        if cfg.get("save_together", False):
-            together_img = visualize_sample_together(
-                img_cv2=img_cv2,
-                outputs=outputs,
-                faces=faces,
-                visualizer=visualizer,
-            )
-            cv2.imwrite(
-                os.path.join(save_dir, f"{image_name}_together_visualization.png"),
-                together_img,
-            )
-            logger.info(
-                f"Saved together visualization: {os.path.join(save_dir, f'{image_name}_together_visualization.png')}"
-            )
+def _save_fused_visualization(
+    save_dir: Path,
+    frame_idx: int,
+    fused_keypoints: np.ndarray,
+) -> Path:
+    save_dir.mkdir(parents=True, exist_ok=True)
+    outputs = [{"pred_keypoints_3d": fused_keypoints}]
+    dummy_img = np.zeros((*DUMMY_IMAGE_SIZE, 3), dtype=np.uint8)
+    kpt3d_img = visualize_3d_skeleton(
+        img_cv2=dummy_img, outputs=outputs, visualizer=visualizer
+    )
+    save_path = save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"
+    cv2.imwrite(str(save_path), kpt3d_img)
+    return save_path

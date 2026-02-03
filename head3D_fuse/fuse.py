@@ -27,6 +27,7 @@ from typing import Dict, Optional, Tuple
 import cv2
 import numpy as np
 from omegaconf import DictConfig
+from tqdm import tqdm
 
 from head3D_fuse.load import (
     assemble_view_npz_paths,
@@ -42,17 +43,16 @@ from head3D_fuse.mesh_3d_eval import (
 
 # vis
 from head3D_fuse.visualization.vis_utils import (
-    visualize_2d_results,
-    visualize_sample_together,
     visualize_3d_skeleton,
     visualizer,
+    _save_view_visualizations,
+    _save_fused_visualization,
 )
 
 # save
-from mesh_triangulation.save import save_3d_joints
+from head3D_fuse.save import _save_fused_keypoints
 
 logger = logging.getLogger(__name__)
-DUMMY_IMAGE_SIZE = (10, 10)  # Placeholder size; visualize_3d_skeleton only uses it as a canvas.
 
 
 def _normalize_keypoints(keypoints: Optional[np.ndarray]) -> Optional[np.ndarray]:
@@ -74,9 +74,9 @@ def fuse_3view_keypoints(
     if fill_value is None:
         fill_value = np.nan
     view_list = list(keypoints_by_view.keys())
-    stacked = np.stack(
-        [keypoints_by_view[view] for view in view_list], axis=0
-    ).astype(np.float64)
+    stacked = np.stack([keypoints_by_view[view] for view in view_list], axis=0).astype(
+        np.float64
+    )
     finite = np.isfinite(stacked).all(axis=-1)
     nonzero = np.linalg.norm(stacked, axis=-1) >= zero_eps
     valid = finite & nonzero
@@ -104,108 +104,6 @@ def fuse_3view_keypoints(
         )
 
     return fused, fused_mask, n_valid
-
-
-def _save_fused_keypoints(
-    save_dir: Path,
-    frame_idx: int,
-    fused_keypoints: np.ndarray,
-    fused_mask: np.ndarray,
-    n_valid: np.ndarray,
-    npz_paths: Dict[str, Path],
-) -> Path:
-    save_dir.mkdir(parents=True, exist_ok=True)
-    save_path = save_dir / f"frame_{frame_idx:06d}_fused.npy"
-    payload = {
-        "frame_idx": frame_idx,
-        "fused_keypoints_3d": fused_keypoints,
-        "fused_mask": fused_mask,
-        "valid_views": n_valid,
-        "npz_paths": {view: str(path) for view, path in npz_paths.items()},
-    }
-    np.save(save_path, payload)
-    return save_path
-
-
-def _save_fused_visualization(
-    save_dir: Path,
-    frame_idx: int,
-    fused_keypoints: np.ndarray,
-) -> Path:
-    save_dir.mkdir(parents=True, exist_ok=True)
-    outputs = [{"pred_keypoints_3d": fused_keypoints}]
-    dummy_img = np.zeros((*DUMMY_IMAGE_SIZE, 3), dtype=np.uint8)
-    kpt3d_img = visualize_3d_skeleton(
-        img_cv2=dummy_img, outputs=outputs, visualizer=visualizer
-    )
-    save_path = save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"
-    cv2.imwrite(str(save_path), kpt3d_img)
-    return save_path
-
-
-def _save_view_visualizations(
-    output: dict,
-    save_root: Path,
-    view: str,
-    frame_idx: int,
-    cfg: DictConfig,
-    visualizer,
-) -> None:
-    logger = logging.getLogger(__name__)
-    frame = output.get("frame")
-    if frame is None:
-        logger.warning("Missing frame for view=%s frame=%s", view, frame_idx)
-        return
-
-    # Visualization helpers expect a list of outputs, even for a single person.
-    outputs_list = [output]
-    plot_2d = cfg.visualize.get("plot_2d", False)
-    save_together = cfg.visualize.get("save_together", False)
-    if plot_2d:
-        save_dir = save_root / view / "2d"
-        save_dir.mkdir(parents=True, exist_ok=True)
-        # visualize_2d_results returns a list; the first entry corresponds to the single output.
-        results = visualize_2d_results(frame, outputs_list, visualizer)
-        if not results or results[0] is None:
-            logger.warning(
-                "2D visualization failed for view=%s frame=%s", view, frame_idx
-            )
-        else:
-            cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_2d.png"), results[0])
-
-    if cfg.visualize.get("save_3d_keypoints", False):
-        save_dir = save_root / view / "3d_kpt"
-        save_dir.mkdir(parents=True, exist_ok=True)
-        kpt3d_img = visualize_3d_skeleton(
-            img_cv2=frame, outputs=outputs_list, visualizer=visualizer
-        )
-        if kpt3d_img is None:
-            logger.warning(
-                "3D keypoint visualization failed for view=%s frame=%s",
-                view,
-                frame_idx,
-            )
-        else:
-            cv2.imwrite(
-                str(save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"), kpt3d_img
-            )
-
-    if save_together:
-        faces = output.get("faces")
-        if faces is None:
-            logger.warning("Missing faces for view=%s frame=%s", view, frame_idx)
-        else:
-            save_dir = save_root / view / "together"
-            save_dir.mkdir(parents=True, exist_ok=True)
-            together_img = visualize_sample_together(
-                img_cv2=frame,
-                outputs=outputs_list,
-                faces=faces,
-                visualizer=visualizer,
-            )
-            cv2.imwrite(
-                str(save_dir / f"frame_{frame_idx:06d}_together.png"), together_img
-            )
 
 
 # ---------------------------------------------------------------------
@@ -238,7 +136,8 @@ def process_single_person_env(
 
     diff_reports = []
     fused_method = cfg.infer.get("fuse_method", "median")
-    for triplet in frame_triplets:
+
+    for triplet in tqdm(frame_triplets, desc=f"Fusing {person_id}/{env_name}"):
         diff = compare_npz_files(triplet.npz_paths)
         if diff:
             diff_reports.append(diff)
@@ -268,7 +167,8 @@ def process_single_person_env(
             method=fused_method,
         )
 
-        save_dir = out_root / env_name / "fused"
+        # 保存融合后的关键点
+        save_dir = out_root / env_name / "fused_npz"
         _save_fused_keypoints(
             save_dir=save_dir,
             frame_idx=triplet.frame_idx,
@@ -278,13 +178,14 @@ def process_single_person_env(
             npz_paths=triplet.npz_paths,
         )
 
-        vis_root = save_dir / "vis"
+        # 可视化保存各个视角结果
         for view in view_list:
             if view not in outputs:
                 logger.warning(
                     f"Missing output for view={view} frame={triplet.frame_idx}"
                 )
                 continue
+            vis_root = out_root / env_name / "vis" / view
             _save_view_visualizations(
                 output=outputs[view],
                 save_root=vis_root,
@@ -296,7 +197,7 @@ def process_single_person_env(
 
         if cfg.visualize.get("save_3d_keypoints", False):
             _save_fused_visualization(
-                save_dir=save_dir / "vis",
+                save_dir=out_root / env_name / "vis" / "fused_3d_keypoints",
                 frame_idx=triplet.frame_idx,
                 fused_keypoints=fused_kpt,
             )
@@ -494,184 +395,3 @@ def process_one_frame_list(
             )
 
         return mesh_3d, (target_h, target_w)
-
-
-def process_one_video(
-    environment_dir: dict[str, Path], output_path: Path, rt_info, K, vis
-):
-
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    front_frames, front_mesh, front_video_info, front_not_mesh_list = (
-        load_SAM3D_results_from_npz(environment_dir["front"])
-    )
-    if front_frames is None:
-        logger.warning(f"No front view data found in {environment_dir['front']}")
-        return
-
-    left_frames, left_mesh, left_video_info, left_not_mesh_list = (
-        load_SAM3D_results_from_npz(environment_dir["left"])
-    )
-    right_frames, right_mesh, right_video_info, right_not_mesh_list = (
-        load_SAM3D_results_from_npz(environment_dir["right"])
-    )
-
-    # * 确保三视点帧数一致
-    if (
-        left_frames.shape[0] != right_frames.shape[0]
-        or left_frames.shape[0] != front_frames.shape[0]
-        or right_frames.shape[0] != front_frames.shape[0]
-    ):
-        min_frames = min(
-            left_frames.shape[0], right_frames.shape[0], front_frames.shape[0]
-        )
-        left_frames = left_frames[:min_frames]
-        left_mesh = left_mesh[:min_frames]
-        right_frames = right_frames[:min_frames]
-        right_mesh = right_mesh[:min_frames]
-        front_frames = front_frames[:min_frames]
-        front_mesh = front_mesh[:min_frames]
-
-        logger.warning(
-            f"Aligned all views to {min_frames} frames based on the shortest video."
-        )
-    else:
-        min_frames = left_frames.shape[0]
-
-    all_mesh_3d = []
-
-    # * 逐帧处理三视点数据，三角测量 3D 网格
-    for i in range(min_frames):
-
-        # ! debug
-        # if i > 50:
-        #     break
-
-        f_mesh = front_mesh[i]
-        l_mesh = left_mesh[i]
-        r_mesh = right_mesh[i]
-
-        f_frame = front_frames[i]
-        l_frame = left_frames[i]
-        r_frame = right_frames[i]
-
-        mesh_3d, (target_h, target_w) = process_one_frame(
-            f_frame,
-            f_mesh,
-            l_frame,
-            l_mesh,
-            r_frame,
-            r_mesh,
-            rt_info,
-            K,
-            output_path,
-            i,
-            vis,
-        )
-
-        if mesh_3d is False:
-            all_mesh_3d.append(np.full_like(f_mesh, np.nan))
-        else:
-            all_mesh_3d.append(mesh_3d)
-
-    all_mesh_3d = np.array(all_mesh_3d)  # (T, N, 3)
-
-    # * 检查缺帧 & 自动插值
-    all_mesh_3d, info = interpolate_missing_frames(
-        all_mesh_3d, method="auto", zero_as_missing=True, zero_axes=(0, 1, 2)
-    )
-    logger.info(f"Missing frame ratio: {info['miss_ratio']:.3f}")
-    logger.info(f"Longest missing run: {info['longest_missing_run']} frames")
-    logger.info(f"Interpolation method used: {info['method_effective']}")
-
-    # * 评估原始三角测量结果
-    metrics_before = evaluate_face3d_pro(all_mesh_3d, fps=30)
-    logger.info("====== Evaluation Metrics Before Smoothing ======")
-    for k, v in metrics_before.items():
-        logger.info(f"{k}: {v:.5f}")
-    # * 导出评估报告
-    export_report(
-        metrics_before,
-        outdir=output_path / "evaluation_report_before_smoothing",
-    )
-
-    # * 平滑 3D 网格序列
-    all_mesh_3d_smooth, report = smooth_combo(all_mesh_3d, alpha=0.3, win=9, poly=2)
-
-    # * 打印平滑报告
-    logger.info("====== Smooth Report ======")
-    logger.info(f"Frames: {report['frames']}, Joints: {report['joints']}")
-    logger.info(f"Motion Energy Before: {report['motion_energy_before']:.5f}")
-    logger.info(f"Motion Energy After : {report['motion_energy_after']:.5f}")
-    logger.info(f"Reduction Rate      : {report['reduction_rate']*100:.2f}% ↓")
-
-    # * 单点轨迹可视化
-    # TODO:
-
-    # * 全剧平均改变量
-    diff = np.nanmean(np.linalg.norm(all_mesh_3d_smooth - all_mesh_3d, axis=2))
-    logger.info(f"Average 3D point change after smoothing: {diff:.5f}")
-
-    # * 评估模型输出稳定性和多视一致性
-    metrics = evaluate_face3d_pro(all_mesh_3d_smooth, fps=30)
-
-    logger.info("====== Evaluation Metrics ======")
-    for k, v in metrics.items():
-        logger.info(f"{k}: {v:.5f}")
-
-    # * 导出评估报告
-    export_report(
-        metrics,
-        outdir=output_path / "evaluation_report",
-    )
-
-    # * 保存 3D 关键点
-    for frame_idx in range(all_mesh_3d_smooth.shape[0]):
-
-        if vis.save_mesh_3d and not np.isnan(all_mesh_3d_smooth[frame_idx]).all():
-
-            save_3d_joints(
-                mesh_3d=all_mesh_3d_smooth[frame_idx],
-                save_dir=output_path / "3d_joints" / "smooth",
-                frame_idx=frame_idx,
-                rt_info=rt_info,
-                k=K,
-                video_path={
-                    "front": str(environment_dir["front"]["video"]),
-                    "left": str(environment_dir["left"]["video"]),
-                    "right": str(environment_dir["right"]["video"]),
-                },
-                npz_path={
-                    "front": str(environment_dir["front"]["npz"]),
-                    "left": str(environment_dir["left"]["npz"]),
-                    "right": str(environment_dir["right"]["npz"]),
-                },
-            )
-
-            visualize_3d_mesh(
-                mesh_3d=all_mesh_3d_smooth[frame_idx],
-                save_path=output_path
-                / "vis"
-                / f"mesh_3D_frames_depth_colored/frame_{frame_idx:04d}.png",
-                title=f"Frame {frame_idx} - 3D Mesh (Depth Colored)",
-                rt_info=rt_info,
-                K=K,
-                image_size=(target_w, target_h),
-                save_views=["default", "front", "left", "right"],  # 需要哪些就写哪些
-                default_view=(20.0, -60.0),
-                invert_y=False,
-            )
-
-    # * merge 3d mesh visualization frames to video
-    if vis.merge_3d_frames_to_video:
-        merge_frames_to_video(
-            frame_dir=output_path / "vis" / "mesh_3D_frames_depth_colored/top",
-            output_video_path=output_path / "vis" / (output_path.stem + "_top.mp4"),
-            fps=30,
-        )
-
-        merge_frames_to_video(
-            frame_dir=output_path / "vis" / "mesh_3D_frames_depth_colored/default",
-            output_video_path=output_path / "vis" / (output_path.stem + "_default.mp4"),
-            fps=30,
-        )
