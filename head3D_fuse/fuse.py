@@ -69,15 +69,17 @@ def _apply_view_transform(
         keypoints: (N, 3) 3D keypoints in the source coordinate system.
         transform: dict containing:
             - "R": (3, 3) rotation matrix.
-            - "t": (3,) camera origin in world coordinates (t_cw, same as C).
+            - "t": (3,) camera origin in world coordinates (same as C).
             - "t_wc": (3,) optional world->camera translation (OpenCV style).
+              With OpenCV convention X_cam = R_wc @ X_world + t_wc,
+              the camera origin is C = -R_wc.T @ t_wc.
             - "C": (3,) optional camera origin in world (alias of "t").
         mode:
             - "world_to_camera": uses world->camera extrinsics (R_wc, t_wc) to align
               camera coordinates into world coordinates via X_world = R_wc.T @ (X_cam - t_wc).
               If "C" or "t" is provided instead of "t_wc", uses X_world = R_wc.T @ X_cam + C.
             - "camera_to_world": uses camera->world extrinsics (R_cw, t_cw) via
-              X_world = R_cw @ X_cam + t_cw.
+              X_world = R_cw @ X_cam + t_cw (camera origin in world).
     """
     if keypoints is None or transform is None:
         return keypoints
@@ -99,15 +101,15 @@ def _apply_view_transform(
         camera_center = t
     keypoints = np.asarray(keypoints, dtype=np.float64)
     if mode == "world_to_camera":
-        if t_wc is not None:
+        if t_wc is not None and camera_center is None:
             camera_center = -R.T @ t_wc
         if camera_center is None:
             raise ValueError("world_to_camera mode requires 't', 't_wc', or 'C'")
         return (R.T @ keypoints.T).T + camera_center
     if mode == "camera_to_world":
-        if t is None:
-            raise ValueError("camera_to_world mode requires 't' translation")
-        return (R @ keypoints.T).T + t
+        if camera_center is None:
+            raise ValueError("camera_to_world mode requires 't' or 'C' translation")
+        return (R @ keypoints.T).T + camera_center
     raise ValueError(
         "transform_mode must be 'world_to_camera' or 'camera_to_world', "
         f"got '{mode}'"

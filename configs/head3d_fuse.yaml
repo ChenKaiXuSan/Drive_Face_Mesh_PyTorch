@@ -27,8 +27,9 @@ infer:
   fuse_method: median
   # Optional: align per-view 3D outputs into a common world coordinate before fusing.
   # Each view can specify R (3x3) and t (3,) from camera to world (or world to camera).
-  # transform_mode: world_to_camera uses X_world = R.T @ X_cam + C (or R.T @ (X_cam - t_wc))
-  # transform_mode: camera_to_world uses X_world = R @ X_cam + t
+  # transform_mode: world_to_camera uses X_world = R.T @ (X_cam - t_wc),
+  # where C = -R.T @ t_wc. If providing C or t instead, X_world = R.T @ X_cam + C.
+  # transform_mode: camera_to_world uses X_world = R @ X_cam + t (camera origin in world).
   transform_mode: world_to_camera
   view_transforms: {}
   workers: 2 # 每个 GPU 使用的工作线程数,3090 建议 2
