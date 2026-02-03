@@ -102,14 +102,14 @@ def _apply_view_transform(
     keypoints = np.asarray(keypoints, dtype=np.float64)
     if mode == "world_to_camera":
         if t_wc is not None and camera_center is None:
-            camera_center = -R.T @ t_wc
+            camera_center = -(R.T @ t_wc)
         if camera_center is None:
             raise ValueError("world_to_camera mode requires 't', 't_wc', or 'C'")
-        return keypoints @ R + camera_center
+        return (keypoints @ R) + camera_center
     if mode == "camera_to_world":
         if camera_center is None:
             raise ValueError("camera_to_world mode requires 't' or 'C' translation")
-        return keypoints @ R.T + camera_center
+        return (keypoints @ R.T) + camera_center
     raise ValueError(
         "transform_mode must be 'world_to_camera' or 'camera_to_world', "
         f"got '{mode}'"
