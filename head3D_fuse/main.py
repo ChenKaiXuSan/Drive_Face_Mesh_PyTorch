@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding:utf-8 -*-
 """
-Triangulate 3D joints from two-view 2D keypoints using either video frames or pre-extracted keypoints.
-Supports modular triangulation, pose estimation, and interactive 3D visualization.
+Fuse 3D head keypoints from multi-view 3D kpts results.
+---------------------------------------------------------------------
 
 Author: Kaixu Chen
 Last Modified: August 4th, 2025
@@ -18,7 +18,7 @@ import hydra
 import numpy as np
 from omegaconf import DictConfig, OmegaConf
 
-from head3D_fuse.fuse import process_single_person_env
+from head3D_fuse.infer import process_single_person_env
 
 logger = logging.getLogger(__name__)
 

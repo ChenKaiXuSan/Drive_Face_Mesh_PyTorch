@@ -20,15 +20,16 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 
-import cv2
-from pathlib import Path
 import logging
+from pathlib import Path
+
+import cv2
 
 logger = logging.getLogger(__name__)
 
 
 def merge_frames_to_video(
-    frame_dir: str, output_video_path: str, fps: int = 30
+    frame_dir: Path, output_video_path: Path, fps: int = 30
 ) -> None:
     """
     将指定目录下的图像帧合并为视频。
@@ -37,7 +38,11 @@ def merge_frames_to_video(
     fps: 视频帧率
     """
 
-    frame_files = sorted(Path(frame_dir).glob("frame_*.png"))
+    if frame_dir.exists() is False:
+        raise ValueError(f"Frame directory does not exist: {frame_dir}")
+
+    frame_files = sorted(frame_dir.glob("frame_*.png"))
+
     if not frame_files:
         raise ValueError(f"No frames found in directory: {frame_dir}")
 
@@ -47,7 +52,7 @@ def merge_frames_to_video(
 
     # 定义视频编码器和输出文件
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # 使用 mp4v 编码
-    video_writer = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
+    video_writer = cv2.VideoWriter(str(output_video_path), fourcc, fps, (width, height))
 
     for frame_file in frame_files:
         frame = cv2.imread(str(frame_file))

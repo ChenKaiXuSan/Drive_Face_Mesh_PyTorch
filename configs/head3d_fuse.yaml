@@ -25,6 +25,24 @@ infer:
   num_inference_steps: 4
   view_list: [front, left, right]
   fuse_method: median
+
+  # Optional: align per-view 3D outputs into a common world coordinate before fusing.
+  # Each view can specify R (3x3) and t (3,) from camera to world (or world to camera).
+  # transform_mode: world_to_camera uses X_world = (X_cam - t_wc) @ R,
+  # where C = -(t_wc @ R). If providing C or t instead, X_world = X_cam @ R + C.
+  # transform_mode: camera_to_world uses X_world = X_cam @ R.T + t (camera origin in world).
+  transform_mode: world_to_camera
+  view_transforms: {}
+
+  # When extrinsics are unavailable, align each view to a reference with Procrustes.
+  # alignment_method: none | procrustes | procrustes_trimmed
+  # alignment_reference: view name to align others against (null uses first view)
+  alignment_method: none
+  alignment_reference: null
+  alignment_scale: true
+  alignment_trim_ratio: 0.2
+  alignment_max_iters: 3
+
   workers: 32
   person_list: [-1] # 指定需要处理的人物 ID 列表，-1 表示处理所有人物
   env_list: [all] # 指定需要处理的环境 ID 列表，-1 表示处理所有环境

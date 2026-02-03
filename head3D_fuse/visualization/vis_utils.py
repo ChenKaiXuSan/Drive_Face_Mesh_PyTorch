@@ -19,17 +19,14 @@ HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-import json
 import logging
-import os
-from typing import Any, Dict, List, Optional
 from pathlib import Path
-from omegaconf import DictConfig
+from typing import Any, Dict, List, Optional
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+from omegaconf import DictConfig
 
 from head3D_fuse.metadata.mhr70 import pose_info as mhr70_pose_info
 from head3D_fuse.visualization.renderer import Renderer
@@ -253,6 +250,7 @@ def visualize_3d_skeleton(
     plt.close(fig)
     return img_3d
 
+
 def _save_view_visualizations(
     output: dict,
     save_root: Path,
@@ -283,7 +281,7 @@ def _save_view_visualizations(
             cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_2d.png"), results[0])
 
     if cfg.visualize.get("save_3d_keypoints", False):
-        save_dir = save_root / view 
+        save_dir = save_root / view
         save_dir.mkdir(parents=True, exist_ok=True)
         kpt3d_img = visualize_3d_skeleton(
             img_cv2=frame, outputs=outputs_list, visualizer=visualizer
@@ -297,11 +295,12 @@ def _save_view_visualizations(
         else:
             cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"), kpt3d_img)
 
+
 def _save_fused_visualization(
     save_dir: Path,
     frame_idx: int,
     fused_keypoints: np.ndarray,
-) -> Path:
+) -> np.ndarray:
     save_dir.mkdir(parents=True, exist_ok=True)
     outputs = [{"pred_keypoints_3d": fused_keypoints}]
     dummy_img = np.zeros((*DUMMY_IMAGE_SIZE, 3), dtype=np.uint8)
@@ -310,4 +309,61 @@ def _save_fused_visualization(
     )
     save_path = save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"
     cv2.imwrite(str(save_path), kpt3d_img)
+    return dummy_img
+
+
+def _save_frame_fuse_3dkpt_visualization(
+    save_dir: Path,
+    frame_idx: int,
+    fused_keypoints: np.ndarray,
+    outputs: Dict[str, dict],
+    visualizer: SkeletonVisualizer,
+) -> Path:
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. 提取并转换颜色 (RGB -> BGR)
+    def to_bgr(img):
+        # 如果图片颜色看起来发蓝，取消下面这一行的注释
+        # return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        return img
+
+    view_images = []
+    sorted_keys = sorted(outputs.keys())
+    for key in sorted_keys[:3]:
+        img = outputs[key].get("frame")
+        if img is not None:
+            view_images.append(to_bgr(img.copy()))
+
+    outputs = [{"pred_keypoints_3d": fused_keypoints}]
+    dummy_img = np.zeros((*DUMMY_IMAGE_SIZE, 3), dtype=np.uint8)
+    kpt3d_img = visualize_3d_skeleton(
+        img_cv2=dummy_img, outputs=outputs, visualizer=visualizer
+    )
+
+    # 2. 统一左侧尺寸并堆叠
+    # 假设以第一张视角图的原始大小为准
+    v_h, v_w = view_images[0].shape[:2]
+    resized_views = [cv2.resize(img, (v_w, v_h)) for img in view_images]
+    left_column = np.vstack(resized_views)
+
+    total_h = left_column.shape[0]  # 左侧总高度
+
+    # 3. 重点：确保右侧图不是黑的，并且拉伸到 total_h
+    f_h, f_w = kpt3d_img.shape[:2]
+
+    # 计算右侧图为了匹配高度所需的宽度
+    new_f_w = int(f_w * (total_h / f_h))
+
+    # 使用 CUBIC 插值放大，确保清晰
+    right_column = cv2.resize(
+        kpt3d_img, (new_f_w, total_h), interpolation=cv2.INTER_CUBIC
+    )
+
+    # 4. 左右拼接
+    final_visualization = np.hstack([left_column, right_column])
+
+    # 5. 保存
+    save_path = save_dir / f"fused_{frame_idx:06d}.jpg"
+    cv2.imwrite(str(save_path), final_visualization)
+
     return save_path
