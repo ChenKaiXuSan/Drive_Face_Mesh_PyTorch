@@ -114,14 +114,14 @@ def _align_keypoints_to_reference(
 
 
 def _finalize_aligned_keypoints(
-    aligned_source: np.ndarray,
+    source_points: np.ndarray,
     original_source: np.ndarray,
     valid_mask: np.ndarray,
     scale: float,
     rot: np.ndarray,
     translation: np.ndarray,
 ) -> np.ndarray:
-    aligned = (scale * aligned_source @ rot) + translation
+    aligned = (scale * source_points @ rot) + translation
     aligned[~valid_mask] = original_source[~valid_mask]
     return aligned
 
@@ -186,8 +186,9 @@ def _align_keypoints_trimmed(
         inlier_mask = new_inlier_mask
     if inlier_mask.sum() < MIN_POINTS_FOR_ALIGNMENT:
         logger.warning(
-            "Robust alignment fell back to original source (inliers=%d).",
+            "Robust alignment fell back to original source (inliers=%d, min=%d).",
             inlier_mask.sum(),
+            MIN_POINTS_FOR_ALIGNMENT,
         )
         return source
     return _finalize_aligned_keypoints(src, source, src_valid, scale, rot, translation)
