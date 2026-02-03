@@ -55,7 +55,7 @@ def test_fuse_3view_keypoints_median_and_nan():
     assert n_valid.tolist() == [3, 1]
 
 
-def test_fuse_3view_keypoints_with_view_transforms():
+def test_fuse_3view_keypoints_with_world_to_camera_alignment():
     keypoints_by_view = {
         "front": np.array([[1.0, 1.0, 1.0]]),
         "left": np.array([[2.0, 1.0, 1.0]]),

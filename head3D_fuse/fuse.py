@@ -69,7 +69,7 @@ def _apply_view_transform(
         keypoints: (N, 3) 3D keypoints in the source coordinate system.
         transform: dict containing:
             - "R": (3, 3) rotation matrix.
-            - "t": (3,) camera center in world coordinates (preferred).
+            - "t": (3,) camera center in world coordinates (same meaning as "C").
             - "t_wc": (3,) optional world->camera translation (OpenCV style).
             - "C": (3,) optional camera center in world coordinates.
         mode:
@@ -98,7 +98,7 @@ def _apply_view_transform(
         if camera_center is not None:
             return (R.T @ keypoints.T).T + camera_center
         if t_wc is not None:
-            return (R.T @ (keypoints - t_wc).T).T
+            return (R.T @ keypoints.T).T - R.T @ t_wc
         if t is not None:
             return (R.T @ keypoints.T).T + t
         raise ValueError("world_to_camera mode requires 't', 't_wc', or 'C'")
