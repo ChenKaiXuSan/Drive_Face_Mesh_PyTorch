@@ -270,7 +270,6 @@ def _save_view_visualizations(
     # Visualization helpers expect a list of outputs, even for a single person.
     outputs_list = [output]
     plot_2d = cfg.visualize.get("plot_2d", False)
-    save_together = cfg.visualize.get("save_together", False)
     if plot_2d:
         save_dir = save_root / view / "2d"
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -284,7 +283,7 @@ def _save_view_visualizations(
             cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_2d.png"), results[0])
 
     if cfg.visualize.get("save_3d_keypoints", False):
-        save_dir = save_root / view / "3d_kpt"
+        save_dir = save_root / view 
         save_dir.mkdir(parents=True, exist_ok=True)
         kpt3d_img = visualize_3d_skeleton(
             img_cv2=frame, outputs=outputs_list, visualizer=visualizer

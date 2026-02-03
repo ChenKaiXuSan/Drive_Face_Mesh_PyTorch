@@ -41,7 +41,17 @@ from head3D_fuse.mesh_3d_eval import (
     export_report,
 )
 
+
 # vis
+from head3D_fuse.visualization.vis_utils import (
+    visualize_3d_skeleton,
+    visualizer,
+    _save_view_visualizations,
+    _save_fused_visualization,
+)
+
+from head3D_fuse.visualization.merge_video import merge_frames_to_video
+
 # save
 from head3D_fuse.save import _save_fused_keypoints
 
@@ -449,7 +459,7 @@ def process_single_person_env(
         )
 
         # 保存融合后的关键点
-        save_dir = out_root / env_name / "fused_npz"
+        save_dir = infer_root / person_id / env_name / "fused_npz"
         _save_fused_keypoints(
             save_dir=save_dir,
             frame_idx=triplet.frame_idx,
@@ -466,7 +476,7 @@ def process_single_person_env(
                     f"Missing output for view={view} frame={triplet.frame_idx}"
                 )
                 continue
-            vis_root = out_root / env_name / "vis" / view
+            vis_root = out_root / person_id / env_name / "different_vis"
             _save_view_visualizations(
                 output=outputs[view],
                 save_root=vis_root,
@@ -478,19 +488,50 @@ def process_single_person_env(
 
         if cfg.visualize.get("save_3d_keypoints", False):
             _save_fused_visualization(
-                save_dir=out_root / env_name / "vis" / "fused_3d_keypoints",
+                save_dir=out_root / person_id / env_name / "vis" / "fused_3d_keypoints",
                 frame_idx=triplet.frame_idx,
                 fused_keypoints=fused_kpt,
             )
 
     if diff_reports:
-        diff_path = out_root / env_name / "npz_diff_report.json"
+        diff_path = out_root / person_id / env_name / "npz_diff_report.json"
         diff_path.parent.mkdir(parents=True, exist_ok=True)
         with diff_path.open("w", encoding="utf-8") as f:
             json.dump(diff_reports, f, ensure_ascii=False, indent=2)
         logger.info("Saved npz diff report to %s", diff_path)
     else:
         logger.info("No npz differences found for %s/%s", person_id, env_name)
+
+    # 融合frame到video
+    merge_frames_to_video(
+        frame_dir=str(out_root / person_id / env_name / "vis" / "fused_3d_keypoints"),
+        output_video_path=str(
+            out_root / person_id / env_name / "merged_video" / "fused_3d_keypoints.mp4"
+        ),
+        fps=30,
+    )
+    # different view
+    merge_frames_to_video(
+        frame_dir=str(out_root / person_id / env_name / "different_vis" / "front"),
+        output_video_path=str(
+            out_root / person_id / env_name / "merged_video" / "front.mp4"
+        ),
+        fps=30,
+    )
+    merge_frames_to_video(
+        frame_dir=str(out_root / person_id / env_name / "different_vis" / "left"),
+        output_video_path=str(
+            out_root / person_id / env_name / "merged_video" / "left.mp4"
+        ),
+        fps=30,
+    )
+    merge_frames_to_video(
+        frame_dir=str(out_root / person_id / env_name / "different_vis" / "right"),
+        output_video_path=str(
+            out_root / person_id / env_name / "merged_video" / "right.mp4"
+        ),
+        fps=30,
+    )
 
 
 def detail_to_txt(detail: dict, save_path: Path):
