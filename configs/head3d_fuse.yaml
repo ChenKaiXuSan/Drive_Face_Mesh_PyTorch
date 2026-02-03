@@ -34,7 +34,7 @@ infer:
   view_transforms: {}
   # When extrinsics are unavailable, align each view to a reference with Procrustes.
   # alignment_method: none | procrustes
-  # alignment_reference: view name to align others against (defaults to first view)
+  # alignment_reference: view name to align others against (null uses first view)
   alignment_method: none
   alignment_reference: null
   alignment_scale: true

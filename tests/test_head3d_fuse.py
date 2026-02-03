@@ -81,9 +81,11 @@ def test_fuse_3view_keypoints_with_extrinsic_alignment():
 
 def test_fuse_3view_keypoints_with_procrustes_alignment():
     ref = np.array([[0.5, 0.0, 0.0], [1.5, 0.0, 0.0], [0.0, 1.0, 0.0]])
-    rotation = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
-    translation = np.array([2.0, -1.0, 0.0])
-    transformed = (ref @ rotation) + translation
+    rotation_matrix = np.array(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    translation_vector = np.array([2.0, -1.0, 0.0])
+    transformed = (ref @ rotation_matrix) + translation_vector
     keypoints_by_view = {
         "front": ref,
         "left": transformed,
