@@ -53,3 +53,27 @@ def test_fuse_3view_keypoints_median_and_nan():
     assert np.allclose(fused[1], np.array([2.0, 2.0, 2.0]))
     assert fused_mask.tolist() == [True, True]
     assert n_valid.tolist() == [3, 1]
+
+
+def test_fuse_3view_keypoints_with_view_transforms():
+    keypoints_by_view = {
+        "front": np.array([[1.0, 1.0, 1.0]]),
+        "left": np.array([[1.0, 1.0, 1.0]]),
+        "right": np.array([[1.0, 1.0, 1.0]]),
+    }
+    view_transforms = {
+        "front": {"R": np.eye(3), "t": np.zeros(3)},
+        "left": {"R": np.eye(3), "t": np.array([1.0, 0.0, 0.0])},
+        "right": {"R": np.eye(3), "t": np.array([-1.0, 0.0, 0.0])},
+    }
+
+    fused, fused_mask, n_valid = fuse_3view_keypoints(
+        keypoints_by_view,
+        method="mean",
+        view_transforms=view_transforms,
+        transform_mode="world_to_camera",
+    )
+
+    assert np.allclose(fused[0], np.array([1.0, 1.0, 1.0]))
+    assert fused_mask.tolist() == [True]
+    assert n_valid.tolist() == [3]

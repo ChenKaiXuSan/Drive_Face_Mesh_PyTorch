@@ -42,13 +42,6 @@ from head3D_fuse.mesh_3d_eval import (
 )
 
 # vis
-from head3D_fuse.visualization.vis_utils import (
-    visualize_3d_skeleton,
-    visualizer,
-    _save_view_visualizations,
-    _save_fused_visualization,
-)
-
 # save
 from head3D_fuse.save import _save_fused_keypoints
 
@@ -64,16 +57,56 @@ def _normalize_keypoints(keypoints: Optional[np.ndarray]) -> Optional[np.ndarray
     return keypoints
 
 
+def _apply_view_transform(
+    keypoints: Optional[np.ndarray],
+    transform: Optional[Dict[str, np.ndarray]],
+    mode: str,
+) -> Optional[np.ndarray]:
+    """Align keypoints to a common world coordinate using per-view extrinsics."""
+    if keypoints is None or transform is None:
+        return keypoints
+    R = np.asarray(transform.get("R"))
+    t = np.asarray(transform.get("t", np.zeros(3)))
+    if R.shape != (3, 3):
+        raise ValueError(f"Expected rotation matrix with shape (3, 3), got {R.shape}")
+    t = t.reshape(3)
+    keypoints = np.asarray(keypoints, dtype=np.float64)
+    if mode == "world_to_camera":
+        return (R.T @ (keypoints - t).T).T
+    if mode == "camera_to_world":
+        return (R @ keypoints.T).T + t
+    raise ValueError(
+        "transform_mode must be 'world_to_camera' or 'camera_to_world', "
+        f"got '{mode}'"
+    )
+
+
 def fuse_3view_keypoints(
     keypoints_by_view: Dict[str, np.ndarray],
     method: str = "median",
     zero_eps: float = 1e-6,
     fill_value: Optional[float] = None,
+    view_transforms: Optional[Dict[str, Dict[str, np.ndarray]]] = None,
+    transform_mode: str = "world_to_camera",
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Fuse three-view 3D keypoints by ignoring invalid (near-zero) joints."""
+    """
+    Fuse three-view 3D keypoints by ignoring invalid (near-zero) joints.
+
+    Optionally apply per-view extrinsics to align each view into a common
+    world coordinate system before fusing.
+    """
     if fill_value is None:
         fill_value = np.nan
     view_list = list(keypoints_by_view.keys())
+    if view_transforms:
+        keypoints_by_view = {
+            view: _apply_view_transform(
+                keypoints_by_view[view],
+                view_transforms.get(view),
+                transform_mode,
+            )
+            for view in view_list
+        }
     stacked = np.stack([keypoints_by_view[view] for view in view_list], axis=0).astype(
         np.float64
     )
@@ -116,6 +149,11 @@ def process_single_person_env(
     cfg: DictConfig,
 ):
     """处理单个人员的所有环境和视角"""
+    from head3D_fuse.visualization.vis_utils import (
+        _save_fused_visualization,
+        _save_view_visualizations,
+        visualizer,
+    )
     person_id = person_env_dir.parent.name
     env_name = person_env_dir.name
     view_list = cfg.infer.get("view_list")
@@ -162,9 +200,13 @@ def process_single_person_env(
             )
             continue
 
+        view_transforms = cfg.infer.get("view_transforms")
+        transform_mode = cfg.infer.get("transform_mode", "world_to_camera")
         fused_kpt, fused_mask, n_valid = fuse_3view_keypoints(
             keypoints_by_view,
             method=fused_method,
+            view_transforms=view_transforms,
+            transform_mode=transform_mode,
         )
 
         # 保存融合后的关键点
