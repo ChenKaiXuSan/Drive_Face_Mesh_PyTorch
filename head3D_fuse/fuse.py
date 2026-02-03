@@ -132,20 +132,18 @@ def _select_trimmed_inliers(
     trim_ratio: float,
 ) -> np.ndarray:
     if trim_ratio <= 0:
-        # trim_ratio of 0 means keep all valid points.
+        # trim_ratio <= 0 means keep all valid points.
         return valid_mask
     if trim_ratio >= 1.0:
         raise ValueError(
-            f"trim_ratio must be in the range [0, 1.0), got {trim_ratio}"
+            f"trim_ratio must be in the range (0, 1.0), got {trim_ratio}"
         )
     valid_idx = np.flatnonzero(valid_mask)
     n_valid = valid_idx.size
     if n_valid == 0:
         return valid_mask
-    n_keep = min(
-        n_valid,
-        max(MIN_POINTS_FOR_ALIGNMENT, int(np.ceil((1.0 - trim_ratio) * n_valid))),
-    )
+    raw_keep = int(np.ceil((1.0 - trim_ratio) * n_valid))
+    n_keep = min(n_valid, max(MIN_POINTS_FOR_ALIGNMENT, raw_keep))
     order = np.argsort(residuals[valid_idx])
     keep_idx = valid_idx[order[:n_keep]]
     trimmed = np.zeros_like(valid_mask, dtype=bool)
@@ -281,7 +279,8 @@ def fuse_3view_keypoints(
     used to align each view to a reference view.
 
     alignment_trim_ratio: fraction of points to trim as outliers (0.0 to <1.0).
-        Only used when alignment_method is "procrustes_trimmed".
+        Values <= 0 keep all points. Only used when alignment_method is
+        "procrustes_trimmed".
     alignment_max_iters: maximum iterations for trimmed alignment refinement.
         Only used when alignment_method is "procrustes_trimmed".
     """
