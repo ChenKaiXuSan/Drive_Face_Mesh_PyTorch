@@ -168,3 +168,40 @@ def test_fuse_3view_keypoints_trimmed_alignment_fallback():
     assert np.allclose(fused, fused_base)
     assert fused_mask.tolist() == [True, True, True]
     assert n_valid.tolist() == [3, 3, 3]
+
+
+def test_fuse_3view_keypoints_trimmed_alignment_moderate():
+    ref = np.array(
+        [
+            [0.5, 0.0, 0.0],
+            [1.5, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [2.0, 1.0, 0.0],
+        ]
+    )
+    rotation_matrix = np.array(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    translation_vector = np.array([2.0, -1.0, 0.0])
+    transformed = (ref @ rotation_matrix) + translation_vector
+    transformed[0] = np.array([8.0, 8.0, 0.0])
+    keypoints_by_view = {
+        "front": ref,
+        "left": transformed,
+        "right": transformed,
+    }
+
+    fused, fused_mask, n_valid = fuse_3view_keypoints(
+        keypoints_by_view,
+        method="mean",
+        alignment_method="procrustes_trimmed",
+        alignment_reference="front",
+        alignment_scale=False,
+        alignment_trim_ratio=0.5,
+        alignment_max_iters=5,
+    )
+
+    assert np.allclose(fused, ref, atol=1e-6)
+    assert fused_mask.tolist() == [True, True, True, True, True]
+    assert n_valid.tolist() == [3, 3, 3, 3, 3]

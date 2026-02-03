@@ -133,6 +133,8 @@ def _select_trimmed_inliers(
 ) -> np.ndarray:
     if trim_ratio <= 0:
         return valid_mask
+    if trim_ratio >= 1.0:
+        raise ValueError("trim_ratio must be less than 1.0")
     valid_idx = np.flatnonzero(valid_mask)
     n_valid = valid_idx.size
     if n_valid == 0:
