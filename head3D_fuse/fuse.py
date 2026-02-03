@@ -112,6 +112,67 @@ def _align_keypoints_to_reference(
     return aligned
 
 
+def _select_trimmed_inliers(
+    residuals: np.ndarray,
+    valid_mask: np.ndarray,
+    trim_ratio: float,
+) -> np.ndarray:
+    if trim_ratio <= 0:
+        return valid_mask
+    valid_idx = np.flatnonzero(valid_mask)
+    n_valid = valid_idx.size
+    if n_valid == 0:
+        return valid_mask
+    n_keep = max(3, int(np.ceil((1.0 - trim_ratio) * n_valid)))
+    order = np.argsort(residuals[valid_idx])
+    keep_idx = valid_idx[order[:n_keep]]
+    trimmed = np.zeros_like(valid_mask, dtype=bool)
+    trimmed[keep_idx] = True
+    return trimmed
+
+
+def _align_keypoints_trimmed(
+    reference: np.ndarray,
+    source: np.ndarray,
+    zero_eps: float,
+    allow_scale: bool,
+    trim_ratio: float,
+    max_iters: int,
+) -> np.ndarray:
+    ref = np.asarray(reference, dtype=np.float64)
+    src = np.asarray(source, dtype=np.float64)
+    ref_valid = _valid_keypoints_mask(ref, zero_eps)
+    src_valid = _valid_keypoints_mask(src, zero_eps)
+    pair_valid = ref_valid & src_valid
+    if pair_valid.sum() < 3:
+        logger.warning(
+            "Not enough valid joints for robust alignment (need >=3, got %d).",
+            pair_valid.sum(),
+        )
+        return source
+    inlier_mask = pair_valid.copy()
+    scale = 1.0
+    rot = np.eye(3)
+    translation = np.zeros(3)
+    for _ in range(max_iters):
+        if inlier_mask.sum() < 3:
+            break
+        scale, rot, translation = _estimate_similarity_transform(
+            src[inlier_mask], ref[inlier_mask], allow_scale
+        )
+        aligned = (scale * src @ rot) + translation
+        residuals = np.linalg.norm(aligned - ref, axis=-1)
+        new_inlier_mask = _select_trimmed_inliers(residuals, pair_valid, trim_ratio)
+        if np.array_equal(new_inlier_mask, inlier_mask):
+            break
+        inlier_mask = new_inlier_mask
+    if inlier_mask.sum() < 3:
+        return source
+    aligned = (scale * src @ rot) + translation
+    aligned[~src_valid] = source[~src_valid]
+    return aligned
+
+
 def _apply_view_transform(
     keypoints: Optional[np.ndarray],
     transform: Optional[Dict[str, np.ndarray]],
@@ -182,6 +243,8 @@ def fuse_3view_keypoints(
     alignment_method: str = "none",
     alignment_reference: Optional[str] = None,
     alignment_scale: bool = True,
+    alignment_trim_ratio: float = 0.2,
+    alignment_max_iters: int = 3,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Fuse three-view 3D keypoints by ignoring invalid (near-zero) joints.
@@ -193,9 +256,9 @@ def fuse_3view_keypoints(
     """
     if fill_value is None:
         fill_value = np.nan
-    if alignment_method not in ("none", "procrustes"):
+    if alignment_method not in ("none", "procrustes", "procrustes_trimmed"):
         raise ValueError(
-            "alignment_method must be 'none' or 'procrustes', "
+            "alignment_method must be 'none', 'procrustes', or 'procrustes_trimmed', "
             f"got '{alignment_method}'"
         )
     view_list = list(keypoints_by_view.keys())
@@ -208,7 +271,7 @@ def fuse_3view_keypoints(
             )
             for view in view_list
         }
-    elif alignment_method == "procrustes":
+    elif alignment_method in ("procrustes", "procrustes_trimmed"):
         reference_view = alignment_reference or view_list[0]
         if reference_view not in keypoints_by_view:
             raise ValueError(f"Reference view '{reference_view}' not found in views.")
@@ -217,11 +280,22 @@ def fuse_3view_keypoints(
             view: (
                 reference
                 if view == reference_view
-                else _align_keypoints_to_reference(
-                    reference,
-                    keypoints_by_view[view],
-                    zero_eps=zero_eps,
-                    allow_scale=alignment_scale,
+                else (
+                    _align_keypoints_to_reference(
+                        reference,
+                        keypoints_by_view[view],
+                        zero_eps=zero_eps,
+                        allow_scale=alignment_scale,
+                    )
+                    if alignment_method == "procrustes"
+                    else _align_keypoints_trimmed(
+                        reference,
+                        keypoints_by_view[view],
+                        zero_eps=zero_eps,
+                        allow_scale=alignment_scale,
+                        trim_ratio=alignment_trim_ratio,
+                        max_iters=alignment_max_iters,
+                    )
                 )
             )
             for view in view_list
@@ -324,6 +398,8 @@ def process_single_person_env(
         alignment_method = cfg.infer.get("alignment_method", "none")
         alignment_reference = cfg.infer.get("alignment_reference")
         alignment_scale = cfg.infer.get("alignment_scale", True)
+        alignment_trim_ratio = cfg.infer.get("alignment_trim_ratio", 0.2)
+        alignment_max_iters = cfg.infer.get("alignment_max_iters", 3)
         fused_kpt, fused_mask, n_valid = fuse_3view_keypoints(
             keypoints_by_view,
             method=fused_method,
@@ -332,6 +408,8 @@ def process_single_person_env(
             alignment_method=alignment_method,
             alignment_reference=alignment_reference,
             alignment_scale=alignment_scale,
+            alignment_trim_ratio=alignment_trim_ratio,
+            alignment_max_iters=alignment_max_iters,
         )
 
         # 保存融合后的关键点
