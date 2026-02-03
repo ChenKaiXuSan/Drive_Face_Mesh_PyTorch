@@ -69,7 +69,7 @@ def _apply_view_transform(
         keypoints: (N, 3) 3D keypoints in the source coordinate system.
         transform: dict containing:
             - "R": (3, 3) rotation matrix.
-            - "t": (3,) camera-to-world translation t_cw (camera origin in world).
+            - "t": (3,) camera origin in world coordinates (t_cw, same as C).
             - "t_wc": (3,) optional world->camera translation (OpenCV style).
             - "C": (3,) optional camera origin in world (alias of "t").
         mode:
@@ -81,6 +81,8 @@ def _apply_view_transform(
     """
     if keypoints is None or transform is None:
         return keypoints
+    if transform.get("R") is None:
+        raise ValueError("transform['R'] is required for view alignment")
     R = np.asarray(transform.get("R"))
     if R.shape != (3, 3):
         raise ValueError(f"Expected rotation matrix with shape (3, 3), got {R.shape}")
@@ -93,15 +95,15 @@ def _apply_view_transform(
     camera_center = transform.get("C")
     if camera_center is not None:
         camera_center = np.asarray(camera_center, dtype=np.float64).reshape(3)
+    if camera_center is None and t is not None:
+        camera_center = t
     keypoints = np.asarray(keypoints, dtype=np.float64)
     if mode == "world_to_camera":
-        if camera_center is not None:
-            return (R.T @ keypoints.T).T + camera_center
         if t_wc is not None:
-            return (R.T @ (keypoints - t_wc).T).T
-        if t is not None:
-            return (R.T @ keypoints.T).T + t
-        raise ValueError("world_to_camera mode requires 't', 't_wc', or 'C'")
+            camera_center = -R.T @ t_wc
+        if camera_center is None:
+            raise ValueError("world_to_camera mode requires 't', 't_wc', or 'C'")
+        return (R.T @ keypoints.T).T + camera_center
     if mode == "camera_to_world":
         if t is None:
             raise ValueError("camera_to_world mode requires 't' translation")
