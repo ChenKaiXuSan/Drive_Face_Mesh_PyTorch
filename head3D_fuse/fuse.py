@@ -132,17 +132,22 @@ def _select_trimmed_inliers(
     trim_ratio: float,
 ) -> np.ndarray:
     if trim_ratio <= 0:
-        # trim_ratio <= 0 means keep all valid points.
+        # trim_ratio <= 0 means no trimming; keep all valid points.
         return valid_mask
     if trim_ratio >= 1.0:
         raise ValueError(
-            f"trim_ratio must be less than 1.0 (<=0 keeps all), got {trim_ratio}"
+            f"trim_ratio must be less than 1.0 (<=0 disables trimming), got {trim_ratio}"
         )
     valid_idx = np.flatnonzero(valid_mask)
     n_valid = valid_idx.size
     if n_valid == 0:
         return valid_mask
     raw_keep = int(np.ceil((1.0 - trim_ratio) * n_valid))
+    if raw_keep < MIN_POINTS_FOR_ALIGNMENT:
+        logger.warning(
+            "trim_ratio keeps fewer than %d points; clamping to minimum.",
+            MIN_POINTS_FOR_ALIGNMENT,
+        )
     n_keep = min(n_valid, max(MIN_POINTS_FOR_ALIGNMENT, raw_keep))
     order = np.argsort(residuals[valid_idx])
     keep_idx = valid_idx[order[:n_keep]]

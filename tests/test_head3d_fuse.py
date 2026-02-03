@@ -120,7 +120,7 @@ def test_fuse_3view_keypoints_with_trimmed_alignment():
     )
     translation_vector = np.array([2.0, -1.0, 0.0])
     transformed = (ref @ rotation_matrix) + translation_vector
-    transformed[0] = np.array([10.0, 10.0, 0.0])
+    transformed[0] = np.array([10.0, 10.0, 0.0])  # inject a strong outlier
     keypoints_by_view = {
         "front": ref,
         "left": transformed,
@@ -185,7 +185,7 @@ def test_fuse_3view_keypoints_trimmed_alignment_moderate():
     )
     translation_vector = np.array([2.0, -1.0, 0.0])
     transformed = (ref @ rotation_matrix) + translation_vector
-    transformed[0] = np.array([8.0, 8.0, 0.0])
+    transformed[0] = np.array([8.0, 8.0, 0.0])  # inject a moderate outlier
     keypoints_by_view = {
         "front": ref,
         "left": transformed,
