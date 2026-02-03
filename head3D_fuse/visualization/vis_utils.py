@@ -19,17 +19,14 @@ HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-import json
 import logging
-import os
-from typing import Any, Dict, List, Optional
 from pathlib import Path
-from omegaconf import DictConfig
+from typing import Any, Dict, List, Optional
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+from omegaconf import DictConfig
 
 from head3D_fuse.metadata.mhr70 import pose_info as mhr70_pose_info
 from head3D_fuse.visualization.renderer import Renderer

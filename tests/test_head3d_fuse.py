@@ -1,6 +1,6 @@
 import numpy as np
 
-from head3D_fuse.fuse import fuse_3view_keypoints
+from head3D_fuse.infer import fuse_3view_keypoints
 
 
 def test_fuse_3view_keypoints_mean():

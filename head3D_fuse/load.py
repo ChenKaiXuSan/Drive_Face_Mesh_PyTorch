@@ -152,9 +152,7 @@ def compare_npz_files(npz_paths: Dict[str, Path]) -> Optional[dict]:
         if len(set(shapes.values())) > 1:
             mismatched_shapes[key] = shapes
 
-    frame_idx_map = {
-        view: output.get("frame_idx") for view, output in outputs.items()
-    }
+    frame_idx_map = {view: output.get("frame_idx") for view, output in outputs.items()}
     frame_idx_values = {val for val in frame_idx_map.values() if val is not None}
     frame_idx_mismatch = frame_idx_map if len(frame_idx_values) > 1 else {}
     frame_idx = None if frame_idx_mismatch else next(iter(frame_idx_values), None)
@@ -170,37 +168,6 @@ def compare_npz_files(npz_paths: Dict[str, Path]) -> Optional[dict]:
         "frame_idx_mismatch": frame_idx_mismatch,
         "npz_paths": {view: str(path) for view, path in npz_paths.items()},
     }
-
-def load_SAM3D_results_from_npz(
-    person_env_dir: Path, view_list: List[str], annotation_dict: Optional[dict] = None
-) -> Dict[str, List[np.ndarray]]:
-    """
-    各視点のディレクトリからnpzファイルを検索し、データをリストとして読み込みます。
-    """
-    view_frames: Dict[str, List[np.ndarray]] = {}
-
-    frame_triplets, report = assemble_view_npz_paths(
-        person_env_dir, view_list, annotation_dict
-    )
-    logger.info(
-        "Aligned npz frames: common=%d, start=%s, end=%s",
-        len(report["common_frames"]),
-        report["start_frame"],
-        report["end_frame"],
-    )
-
-    for view in view_list:
-        view_frames[view] = [
-            triplet.npz_paths[view] for triplet in frame_triplets
-        ]
-
-    return PersonInfo(
-        person_id=person_env_dir.parent.name,
-        env_id=person_env_dir.name,
-        front_npz_paths=view_frames.get("front", []),
-        left_npz_paths=view_frames.get("left", []),
-        right_npz_paths=view_frames.get("right", []),
-    )
 
 
 MAPPING = {
