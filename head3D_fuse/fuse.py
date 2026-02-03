@@ -69,15 +69,15 @@ def _apply_view_transform(
         keypoints: (N, 3) 3D keypoints in the source coordinate system.
         transform: dict containing:
             - "R": (3, 3) rotation matrix.
-            - "t": (3,) camera-to-world translation t_cw (camera center in world coordinates).
+            - "t": (3,) camera-to-world translation t_cw (camera origin in world).
             - "t_wc": (3,) optional world->camera translation (OpenCV style).
-            - "C": (3,) optional camera center in world coordinates (alias of "t").
+            - "C": (3,) optional camera origin in world (alias of "t").
         mode:
-            - "world_to_camera": input uses world->camera rotation R_wc.
-              Output uses X_world = R_wc.T @ X_cam + C (camera center).
-              If "t_wc" is provided, uses X_world = R_wc.T @ (X_cam - t_wc).
-            - "camera_to_world": input transform is camera->world (R_cw, t_cw).
-              Output uses X_world = R_cw @ X_cam + t_cw.
+            - "world_to_camera": uses world->camera extrinsics (R_wc, t_wc) to align
+              camera coordinates into world coordinates via X_world = R_wc.T @ (X_cam - t_wc).
+              If "C" or "t" is provided instead of "t_wc", uses X_world = R_wc.T @ X_cam + C.
+            - "camera_to_world": uses camera->world extrinsics (R_cw, t_cw) via
+              X_world = R_cw @ X_cam + t_cw.
     """
     if keypoints is None or transform is None:
         return keypoints
@@ -98,8 +98,7 @@ def _apply_view_transform(
         if camera_center is not None:
             return (R.T @ keypoints.T).T + camera_center
         if t_wc is not None:
-            t_wc_rot = R.T @ t_wc
-            return (R.T @ keypoints.T).T - t_wc_rot
+            return (R.T @ (keypoints - t_wc).T).T
         if t is not None:
             return (R.T @ keypoints.T).T + t
         raise ValueError("world_to_camera mode requires 't', 't_wc', or 'C'")
