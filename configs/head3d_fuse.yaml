@@ -25,6 +25,6 @@ infer:
   num_inference_steps: 4
   view_list: [front, left, right]
   fuse_method: median
-  workers: 22
-  person_list: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] # 指定需要处理的人物 ID 列表，-1 表示处理所有人物
+  workers: 32
+  person_list: [-1] # 指定需要处理的人物 ID 列表，-1 表示处理所有人物
   env_list: [all] # 指定需要处理的环境 ID 列表，-1 表示处理所有环境
