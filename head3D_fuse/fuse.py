@@ -113,15 +113,15 @@ def _align_keypoints_to_reference(
 
 
 def _finalize_aligned_keypoints(
-    source: np.ndarray,
-    raw_source: np.ndarray,
+    aligned_source: np.ndarray,
+    original_source: np.ndarray,
     valid_mask: np.ndarray,
     scale: float,
     rot: np.ndarray,
     translation: np.ndarray,
 ) -> np.ndarray:
-    aligned = (scale * source @ rot) + translation
-    aligned[~valid_mask] = raw_source[~valid_mask]
+    aligned = (scale * aligned_source @ rot) + translation
+    aligned[~valid_mask] = original_source[~valid_mask]
     return aligned
 
 
@@ -136,7 +136,9 @@ def _select_trimmed_inliers(
     n_valid = valid_idx.size
     if n_valid == 0:
         return valid_mask
-    n_keep = max(3, int(np.ceil((1.0 - trim_ratio) * n_valid)))
+    n_keep = max(
+        MIN_POINTS_FOR_ALIGNMENT, int(np.ceil((1.0 - trim_ratio) * n_valid))
+    )
     order = np.argsort(residuals[valid_idx])
     keep_idx = valid_idx[order[:n_keep]]
     trimmed = np.zeros_like(valid_mask, dtype=bool)
