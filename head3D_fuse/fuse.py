@@ -136,7 +136,7 @@ def _select_trimmed_inliers(
         return valid_mask
     if trim_ratio >= 1.0:
         raise ValueError(
-            f"trim_ratio must be in the range (0, 1.0), got {trim_ratio}"
+            f"trim_ratio must be less than 1.0 (<=0 keeps all), got {trim_ratio}"
         )
     valid_idx = np.flatnonzero(valid_mask)
     n_valid = valid_idx.size
@@ -278,11 +278,12 @@ def fuse_3view_keypoints(
     a Procrustes alignment (rotation/translation and optional scale) can be
     used to align each view to a reference view.
 
-    alignment_trim_ratio: fraction of points to trim as outliers (0.0 to <1.0).
-        Values <= 0 keep all points. Only used when alignment_method is
-        "procrustes_trimmed".
-    alignment_max_iters: maximum iterations for trimmed alignment refinement.
-        Only used when alignment_method is "procrustes_trimmed".
+    Args:
+        alignment_trim_ratio: fraction of points to trim as outliers (0.0 to <1.0).
+            Values <= 0 keep all points. Only used when alignment_method is
+            "procrustes_trimmed".
+        alignment_max_iters: maximum iterations for trimmed alignment refinement.
+            Only used when alignment_method is "procrustes_trimmed".
     """
     if fill_value is None:
         fill_value = np.nan
