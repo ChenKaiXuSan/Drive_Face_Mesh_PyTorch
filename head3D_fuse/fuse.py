@@ -57,6 +57,61 @@ def _normalize_keypoints(keypoints: Optional[np.ndarray]) -> Optional[np.ndarray
     return keypoints
 
 
+def _valid_keypoints_mask(keypoints: np.ndarray, zero_eps: float) -> np.ndarray:
+    finite = np.isfinite(keypoints).all(axis=-1)
+    nonzero = np.linalg.norm(keypoints, axis=-1) >= zero_eps
+    return finite & nonzero
+
+
+def _estimate_similarity_transform(
+    source: np.ndarray,
+    target: np.ndarray,
+    allow_scale: bool,
+    eps: float = 1e-8,
+) -> Tuple[float, np.ndarray, np.ndarray]:
+    source_mean = source.mean(axis=0)
+    target_mean = target.mean(axis=0)
+    source_centered = source - source_mean
+    target_centered = target - target_mean
+    h_mat = source_centered.T @ target_centered
+    u_mat, s_vals, vt_mat = np.linalg.svd(h_mat)
+    rot = vt_mat.T @ u_mat.T
+    if np.linalg.det(rot) < 0:
+        vt_mat[-1, :] *= -1
+        rot = vt_mat.T @ u_mat.T
+    scale = 1.0
+    if allow_scale:
+        denom = float(np.sum(source_centered**2))
+        scale = float(np.sum(s_vals) / denom) if denom > eps else 1.0
+    translation = target_mean - scale * (source_mean @ rot)
+    return scale, rot, translation
+
+
+def _align_keypoints_to_reference(
+    reference: np.ndarray,
+    source: np.ndarray,
+    zero_eps: float,
+    allow_scale: bool,
+) -> np.ndarray:
+    ref = np.asarray(reference, dtype=np.float64)
+    src = np.asarray(source, dtype=np.float64)
+    ref_valid = _valid_keypoints_mask(ref, zero_eps)
+    src_valid = _valid_keypoints_mask(src, zero_eps)
+    pair_valid = ref_valid & src_valid
+    if pair_valid.sum() < 3:
+        logger.warning(
+            "Not enough valid joints for alignment (need >=3, got %d).",
+            pair_valid.sum(),
+        )
+        return source
+    scale, rot, translation = _estimate_similarity_transform(
+        src[pair_valid], ref[pair_valid], allow_scale
+    )
+    aligned = (scale * src @ rot) + translation
+    aligned[~src_valid] = source[~src_valid]
+    return aligned
+
+
 def _apply_view_transform(
     keypoints: Optional[np.ndarray],
     transform: Optional[Dict[str, np.ndarray]],
@@ -124,15 +179,25 @@ def fuse_3view_keypoints(
     fill_value: Optional[float] = None,
     view_transforms: Optional[Dict[str, Dict[str, np.ndarray]]] = None,
     transform_mode: str = "world_to_camera",
+    alignment_method: str = "none",
+    alignment_reference: Optional[str] = None,
+    alignment_scale: bool = True,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Fuse three-view 3D keypoints by ignoring invalid (near-zero) joints.
 
     Optionally apply per-view extrinsics to align each view into a common
-    world coordinate system before fusing.
+    world coordinate system before fusing. If no extrinsics are available,
+    a Procrustes alignment (rotation/translation and optional scale) can be
+    used to align each view to a reference view.
     """
     if fill_value is None:
         fill_value = np.nan
+    if alignment_method not in ("none", "procrustes"):
+        raise ValueError(
+            "alignment_method must be 'none' or 'procrustes', "
+            f"got '{alignment_method}'"
+        )
     view_list = list(keypoints_by_view.keys())
     if view_transforms:
         keypoints_by_view = {
@@ -140,6 +205,24 @@ def fuse_3view_keypoints(
                 keypoints_by_view[view],
                 view_transforms.get(view),
                 transform_mode,
+            )
+            for view in view_list
+        }
+    elif alignment_method == "procrustes":
+        reference_view = alignment_reference or view_list[0]
+        if reference_view not in keypoints_by_view:
+            raise ValueError(f"Reference view '{reference_view}' not found in views.")
+        reference = keypoints_by_view[reference_view]
+        keypoints_by_view = {
+            view: (
+                reference
+                if view == reference_view
+                else _align_keypoints_to_reference(
+                    reference,
+                    keypoints_by_view[view],
+                    zero_eps=zero_eps,
+                    allow_scale=alignment_scale,
+                )
             )
             for view in view_list
         }
@@ -238,11 +321,17 @@ def process_single_person_env(
 
         view_transforms = cfg.infer.get("view_transforms")
         transform_mode = cfg.infer.get("transform_mode", "world_to_camera")
+        alignment_method = cfg.infer.get("alignment_method", "none")
+        alignment_reference = cfg.infer.get("alignment_reference")
+        alignment_scale = cfg.infer.get("alignment_scale", True)
         fused_kpt, fused_mask, n_valid = fuse_3view_keypoints(
             keypoints_by_view,
             method=fused_method,
             view_transforms=view_transforms,
             transform_mode=transform_mode,
+            alignment_method=alignment_method,
+            alignment_reference=alignment_reference,
+            alignment_scale=alignment_scale,
         )
 
         # 保存融合后的关键点
