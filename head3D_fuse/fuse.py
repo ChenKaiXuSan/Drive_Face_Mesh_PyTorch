@@ -105,11 +105,11 @@ def _apply_view_transform(
             camera_center = -R.T @ t_wc
         if camera_center is None:
             raise ValueError("world_to_camera mode requires 't', 't_wc', or 'C'")
-        return (R.T @ keypoints.T).T + camera_center
+        return keypoints @ R + camera_center
     if mode == "camera_to_world":
         if camera_center is None:
             raise ValueError("camera_to_world mode requires 't' or 'C' translation")
-        return (R @ keypoints.T).T + camera_center
+        return keypoints @ R.T + camera_center
     raise ValueError(
         "transform_mode must be 'world_to_camera' or 'camera_to_world', "
         f"got '{mode}'"
