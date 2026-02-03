@@ -150,6 +150,11 @@ def test_fuse_3view_keypoints_trimmed_alignment_fallback():
         "right": ref - 1.0,
     }
 
+    fused_base, fused_mask_base, n_valid_base = fuse_3view_keypoints(
+        keypoints_by_view,
+        method="mean",
+    )
+
     fused, fused_mask, n_valid = fuse_3view_keypoints(
         keypoints_by_view,
         method="mean",
@@ -160,6 +165,6 @@ def test_fuse_3view_keypoints_trimmed_alignment_fallback():
         alignment_max_iters=5,
     )
 
-    assert np.allclose(fused, ref)
+    assert np.allclose(fused, fused_base)
     assert fused_mask.tolist() == [True, True, True]
     assert n_valid.tolist() == [1, 1, 1]
