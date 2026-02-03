@@ -49,6 +49,7 @@ from head3D_fuse.visualization.vis_utils import (
     _save_view_visualizations,
     visualize_3d_skeleton,
     visualizer,
+    _save_frame_fuse_3dkpt_visualization,
 )
 
 from head3D_fuse.fuse import fuse_3view_keypoints
@@ -178,6 +179,15 @@ def process_single_person_env(
                 fused_keypoints=fused_kpt,
             )
 
+        # 保存三个视角的frame和融合结果的可视画
+        _save_frame_fuse_3dkpt_visualization(
+            save_dir=out_root / person_id / env_name / "vis" / "vis_together",
+            frame_idx=triplet.frame_idx,
+            fused_keypoints=fused_kpt,
+            outputs=outputs,
+            visualizer=visualizer,
+        )
+
     if diff_reports:
         diff_path = out_root / person_id / env_name / "npz_diff_report.json"
         diff_path.parent.mkdir(parents=True, exist_ok=True)
@@ -189,31 +199,35 @@ def process_single_person_env(
 
     # 融合frame到video
     merge_frames_to_video(
-        frame_dir=str(out_root / person_id / env_name / "vis" / "fused_3d_keypoints"),
-        output_video_path=str(
-            out_root / person_id / env_name / "merged_video" / "fused_3d_keypoints.mp4"
-        ),
+        frame_dir=out_root / person_id / env_name / "vis" / "fused_3d_keypoints",
+        output_video_path=out_root
+        / person_id
+        / env_name
+        / "merged_video"
+        / "fused_3d_keypoints.mp4",
         fps=30,
     )
     # different view
     merge_frames_to_video(
-        frame_dir=str(out_root / person_id / env_name / "different_vis" / "front"),
-        output_video_path=str(
-            out_root / person_id / env_name / "merged_video" / "front.mp4"
-        ),
+        frame_dir=out_root / person_id / env_name / "different_vis" / "front",
+        output_video_path=out_root
+        / person_id
+        / env_name
+        / "merged_video"
+        / "front.mp4",
         fps=30,
     )
     merge_frames_to_video(
-        frame_dir=str(out_root / person_id / env_name / "different_vis" / "left"),
-        output_video_path=str(
-            out_root / person_id / env_name / "merged_video" / "left.mp4"
-        ),
+        frame_dir=out_root / person_id / env_name / "different_vis" / "left",
+        output_video_path=out_root / person_id / env_name / "merged_video" / "left.mp4",
         fps=30,
     )
     merge_frames_to_video(
-        frame_dir=str(out_root / person_id / env_name / "different_vis" / "right"),
-        output_video_path=str(
-            out_root / person_id / env_name / "merged_video" / "right.mp4"
-        ),
+        frame_dir=out_root / person_id / env_name / "different_vis" / "right",
+        output_video_path=out_root
+        / person_id
+        / env_name
+        / "merged_video"
+        / "right.mp4",
         fps=30,
     )
