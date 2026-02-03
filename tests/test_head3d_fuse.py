@@ -160,6 +160,6 @@ def test_fuse_3view_keypoints_trimmed_alignment_fallback():
         alignment_max_iters=5,
     )
 
-    assert np.allclose(fused, np.array([0.5, 0.0, 0.0]))
+    assert np.allclose(fused, ref)
     assert fused_mask.tolist() == [True, True, True]
     assert n_valid.tolist() == [1, 1, 1]

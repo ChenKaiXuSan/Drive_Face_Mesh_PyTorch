@@ -139,7 +139,7 @@ def _select_trimmed_inliers(
         return valid_mask
     n_keep = min(
         n_valid,
-        max(MIN_POINTS_FOR_ALIGNMENT, int(np.ceil((1.0 - trim_ratio) * n_valid))),
+        max(1, int(np.ceil((1.0 - trim_ratio) * n_valid))),
     )
     order = np.argsort(residuals[valid_idx])
     keep_idx = valid_idx[order[:n_keep]]
@@ -185,6 +185,10 @@ def _align_keypoints_trimmed(
             break
         inlier_mask = new_inlier_mask
     if inlier_mask.sum() < MIN_POINTS_FOR_ALIGNMENT:
+        logger.warning(
+            "Robust alignment fell back to original source (inliers=%d).",
+            inlier_mask.sum(),
+        )
         return source
     return _finalize_aligned_keypoints(src, source, src_valid, scale, rot, translation)
 
