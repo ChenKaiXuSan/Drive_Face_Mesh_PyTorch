@@ -62,18 +62,49 @@ def _apply_view_transform(
     transform: Optional[Dict[str, np.ndarray]],
     mode: str,
 ) -> Optional[np.ndarray]:
-    """Align keypoints to a common world coordinate using per-view extrinsics."""
+    """
+    Align keypoints to a common world coordinate using per-view extrinsics.
+
+    Args:
+        keypoints: (N, 3) 3D keypoints in the source coordinate system.
+        transform: dict containing:
+            - "R": (3, 3) rotation matrix.
+            - "t": (3,) camera center in world coordinates (preferred).
+            - "t_wc": (3,) optional world->camera translation (OpenCV style).
+            - "C": (3,) optional camera center in world coordinates.
+        mode:
+            - "world_to_camera": input uses world->camera rotation R_wc.
+              Output uses X_world = R_wc.T @ X_cam + C (camera center).
+              If "t_wc" is provided, uses X_world = R_wc.T @ (X_cam - t_wc).
+            - "camera_to_world": input transform is camera->world (R_cw, t_cw).
+              Output uses X_world = R_cw @ X_cam + t_cw.
+    """
     if keypoints is None or transform is None:
         return keypoints
     R = np.asarray(transform.get("R"))
-    t = np.asarray(transform.get("t", np.zeros(3)))
     if R.shape != (3, 3):
         raise ValueError(f"Expected rotation matrix with shape (3, 3), got {R.shape}")
-    t = t.reshape(3)
+    t = transform.get("t")
+    if t is not None:
+        t = np.asarray(t, dtype=np.float64).reshape(3)
+    t_wc = transform.get("t_wc")
+    if t_wc is not None:
+        t_wc = np.asarray(t_wc, dtype=np.float64).reshape(3)
+    camera_center = transform.get("C")
+    if camera_center is not None:
+        camera_center = np.asarray(camera_center, dtype=np.float64).reshape(3)
     keypoints = np.asarray(keypoints, dtype=np.float64)
     if mode == "world_to_camera":
-        return (R.T @ (keypoints - t).T).T
+        if camera_center is not None:
+            return (R.T @ keypoints.T).T + camera_center
+        if t_wc is not None:
+            return (R.T @ (keypoints - t_wc).T).T
+        if t is not None:
+            return (R.T @ keypoints.T).T + t
+        raise ValueError("world_to_camera mode requires 't', 't_wc', or 'C'")
     if mode == "camera_to_world":
+        if t is None:
+            raise ValueError("camera_to_world mode requires 't' translation")
         return (R @ keypoints.T).T + t
     raise ValueError(
         "transform_mode must be 'world_to_camera' or 'camera_to_world', "

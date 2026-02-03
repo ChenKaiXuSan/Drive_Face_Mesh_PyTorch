@@ -58,13 +58,13 @@ def test_fuse_3view_keypoints_median_and_nan():
 def test_fuse_3view_keypoints_with_view_transforms():
     keypoints_by_view = {
         "front": np.array([[1.0, 1.0, 1.0]]),
-        "left": np.array([[1.0, 1.0, 1.0]]),
-        "right": np.array([[1.0, 1.0, 1.0]]),
+        "left": np.array([[2.0, 1.0, 1.0]]),
+        "right": np.array([[0.0, 1.0, 1.0]]),
     }
     view_transforms = {
-        "front": {"R": np.eye(3), "t": np.zeros(3)},
-        "left": {"R": np.eye(3), "t": np.array([1.0, 0.0, 0.0])},
-        "right": {"R": np.eye(3), "t": np.array([-1.0, 0.0, 0.0])},
+        "front": {"R": np.eye(3), "t_wc": np.zeros(3)},
+        "left": {"R": np.eye(3), "t_wc": np.array([1.0, 0.0, 0.0])},
+        "right": {"R": np.eye(3), "t_wc": np.array([-1.0, 0.0, 0.0])},
     }
 
     fused, fused_mask, n_valid = fuse_3view_keypoints(
