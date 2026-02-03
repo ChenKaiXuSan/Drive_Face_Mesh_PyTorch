@@ -19,6 +19,7 @@ HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
+from typing import Dict
 from pathlib import Path
 import logging
 import numpy as np
@@ -26,39 +27,22 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-def save_3d_joints(
-    mesh_3d: np.ndarray,
+def _save_fused_keypoints(
     save_dir: Path,
     frame_idx: int,
-    rt_info: dict[str, dict[str, np.ndarray]],
-    k: dict[int, np.ndarray],
-    video_path: dict[str, str],
-    npz_path: dict[str, str],
-):
-    """
-    保存3D关节坐标到文件（支持 npy / csv / json）
-
-    Args:
-        joints_3d (np.ndarray): (J,3) 关节坐标，单位可为m或任意世界单位
-        save_dir (str): 输出文件夹路径
-        frame_idx (int): 当前帧编号
-        fmt (str): 保存格式，可选 ['npy', 'csv', 'json']
-    """
+    fused_keypoints: np.ndarray,
+    fused_mask: np.ndarray,
+    n_valid: np.ndarray,
+    npz_paths: Dict[str, Path],
+) -> Path:
     save_dir.mkdir(parents=True, exist_ok=True)
-
-    fname_base = f"frame_{frame_idx:04d}"
-
-    save_info = {
-        "frame": frame_idx,
-        "num_joints": len(mesh_3d),
-        "joints_3d": mesh_3d,
-        "rt_info": rt_info,  # 保存所有相机的RT信息
-        "K": k,
-        "video_path": video_path,
-        "npz_path": npz_path,
+    save_path = save_dir / f"frame_{frame_idx:06d}_fused.npy"
+    payload = {
+        "frame_idx": frame_idx,
+        "fused_keypoints_3d": fused_keypoints,
+        "fused_mask": fused_mask,
+        "valid_views": n_valid,
+        "npz_paths": {view: str(path) for view, path in npz_paths.items()},
     }
-    np.save(str(save_dir / f"{fname_base}.npy"), save_info)
-
-    logger.info(
-        f"3D joints and info saved (npy) → {str(save_dir / f'{fname_base}.npy')}"
-    )
+    np.save(save_path, payload)
+    logger.info(f"Fused keypoints saved → {save_path}")

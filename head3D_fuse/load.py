@@ -2,8 +2,9 @@ import dataclasses
 import json
 import logging
 import os
+import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -19,8 +20,157 @@ class PersonInfo:
     right_npz_paths: List[Path] = dataclasses.field(default_factory=list)
 
 
-# TODO: 这里先整理三个视角的npz文件
-# TODO： 后续根据annotation_dict进行裁剪，并确认
+@dataclasses.dataclass
+class FrameTriplet:
+    frame_idx: int
+    npz_paths: Dict[str, Path]
+
+
+def _extract_frame_idx(npz_path: Path) -> Optional[int]:
+    stem = npz_path.stem
+    # Expected format: "<frame>_SAM3D_body.npz"; fallback to leading digits and trailing numeric tokens.
+    match = re.match(r"^(\d+)_SAM3D", stem, flags=re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    match = re.match(r"^(\d+)", stem)
+    if match:
+        return int(match.group(1))
+    parts = stem.split("_")
+    for part in reversed(parts):
+        if part.isdigit():
+            return int(part)
+    matches = re.findall(r"\d+", stem)
+    return int(matches[-1]) if matches else None
+
+
+def _lookup_annotation_range(
+    annotation_dict: Optional[dict], person_id: str, env_id: str
+) -> Tuple[Optional[int], Optional[int]]:
+    if not annotation_dict:
+        return None, None
+    for key in (person_id, f"person_{person_id}"):
+        if key in annotation_dict and env_id in annotation_dict[key]:
+            frames_info = annotation_dict[key][env_id]
+            return frames_info.get("start"), frames_info.get("end")
+    return None, None
+
+
+def _collect_view_npz(view_path: Path) -> Dict[int, Path]:
+    npz_files = list(view_path.glob("*.npz"))
+    if not npz_files:
+        logger.warning(f"No npz files found in: {view_path}")
+        return {}
+    frame_map: Dict[int, Path] = {}
+    for npz_file in npz_files:
+        frame_idx = _extract_frame_idx(npz_file)
+        if frame_idx is None:
+            logger.warning(f"Invalid frame number in file: {npz_file}")
+            continue
+        frame_map[frame_idx] = npz_file
+    return frame_map
+
+
+def assemble_view_npz_paths(
+    person_env_dir: Path,
+    view_list: List[str],
+    annotation_dict: Optional[dict] = None,
+) -> Tuple[List[FrameTriplet], Dict[str, Dict[str, List[int]]]]:
+    view_frames: Dict[str, Dict[int, Path]] = {}
+    for view in view_list:
+        view_frames[view] = _collect_view_npz(person_env_dir / view)
+
+    start_frame, end_frame = _lookup_annotation_range(
+        annotation_dict, person_env_dir.parent.name, person_env_dir.name
+    )
+    for view, frame_map in view_frames.items():
+        view_frames[view] = {
+            frame_idx: npz_path
+            for frame_idx, npz_path in frame_map.items()
+            if (start_frame is None or frame_idx >= start_frame)
+            and (end_frame is None or frame_idx <= end_frame)
+        }
+
+    if view_frames:
+        common_frames = set.intersection(
+            *[set(frame_map.keys()) for frame_map in view_frames.values()]
+        )
+        all_frames = set.union(
+            *[set(frame_map.keys()) for frame_map in view_frames.values()]
+        )
+    else:
+        common_frames = set()
+        all_frames = set()
+
+    frame_triplets = [
+        FrameTriplet(
+            frame_idx=frame_idx,
+            npz_paths={view: view_frames[view][frame_idx] for view in view_list},
+        )
+        for frame_idx in sorted(common_frames)
+    ]
+
+    report = {
+        "frames_per_view": {
+            view: sorted(frame_map.keys()) for view, frame_map in view_frames.items()
+        },
+        "missing_frames": {
+            view: sorted(all_frames - set(frame_map.keys()))
+            for view, frame_map in view_frames.items()
+        },
+        "common_frames": sorted(common_frames),
+        "start_frame": start_frame,
+        "end_frame": end_frame,
+    }
+    return frame_triplets, report
+
+
+def load_npz_output(npz_path: Path) -> dict:
+    data = np.load(npz_path, allow_pickle=True)
+    if "output" not in data:
+        raise KeyError(f"Missing 'output' in {npz_path}")
+    output = data["output"]
+    if isinstance(output, np.ndarray) and output.dtype == object:
+        output = output.item()
+    return output
+
+
+def compare_npz_files(npz_paths: Dict[str, Path]) -> Optional[dict]:
+    outputs = {view: load_npz_output(path) for view, path in npz_paths.items()}
+    all_keys = set().union(*[set(output.keys()) for output in outputs.values()])
+    missing_keys = {
+        view: sorted(all_keys - set(output.keys())) for view, output in outputs.items()
+    }
+
+    mismatched_shapes: Dict[str, Dict[str, Optional[Tuple[int, ...]]]] = {}
+    # Validate core geometry fields; "frame" is image data and "frame_idx" is validated separately.
+    keys_to_check = ("pred_keypoints_3d", "pred_keypoints_2d", "pred_vertices", "frame")
+    for key in keys_to_check:
+        shapes = {}
+        for view, output in outputs.items():
+            value = output.get(key)
+            shapes[view] = value.shape if isinstance(value, np.ndarray) else None
+        if len(set(shapes.values())) > 1:
+            mismatched_shapes[key] = shapes
+
+    frame_idx_map = {
+        view: output.get("frame_idx") for view, output in outputs.items()
+    }
+    frame_idx_values = {val for val in frame_idx_map.values() if val is not None}
+    frame_idx_mismatch = frame_idx_map if len(frame_idx_values) > 1 else {}
+    frame_idx = None if frame_idx_mismatch else next(iter(frame_idx_values), None)
+
+    has_missing = any(missing_keys[view] for view in missing_keys)
+    if not has_missing and not mismatched_shapes and not frame_idx_mismatch:
+        return None
+
+    return {
+        "frame_idx": frame_idx,
+        "missing_keys": missing_keys,
+        "shape_mismatch": mismatched_shapes,
+        "frame_idx_mismatch": frame_idx_mismatch,
+        "npz_paths": {view: str(path) for view, path in npz_paths.items()},
+    }
+
 def load_SAM3D_results_from_npz(
     person_env_dir: Path, view_list: List[str], annotation_dict: Optional[dict] = None
 ) -> Dict[str, List[np.ndarray]]:
@@ -29,54 +179,20 @@ def load_SAM3D_results_from_npz(
     """
     view_frames: Dict[str, List[np.ndarray]] = {}
 
+    frame_triplets, report = assemble_view_npz_paths(
+        person_env_dir, view_list, annotation_dict
+    )
+    logger.info(
+        "Aligned npz frames: common=%d, start=%s, end=%s",
+        len(report["common_frames"]),
+        report["start_frame"],
+        report["end_frame"],
+    )
+
     for view in view_list:
-        view_path = person_env_dir / view
-
-        # globを直接リスト化し、ファイルが存在するか確認
-        npz_files = list(view_path.glob("*.npz"))
-
-        if not npz_files:
-            logger.warning(f"No npz files found in: {view_path}")
-            view_frames[view] = []
-            continue
-
-        # 読み込み処理の実行（最新のファイルを1つ読み込む、または全読み込み）
-        frames_in_view = []
-        for npz_file in npz_files:
-            frames_in_view.append(npz_file)
-
-        view_frames[view] = sorted(frames_in_view)
-
-    #TODO：
-    # 根据annotation_dict进行裁剪（如果提供了的话）
-    if annotation_dict:
-        person_id = person_env_dir.parent.name
-        env_id = person_env_dir.name
-
-        if (
-            person_id in annotation_dict
-            and env_id in annotation_dict[person_id]
-        ):
-            frames_info = annotation_dict[person_id][env_id]
-            start_frame = frames_info.get("start")
-            end_frame = frames_info.get("end")
-
-            for view in view_list:
-                if view in view_frames:
-                    # npzファイル名からフレーム番号を抽出してフィルタリング
-                    filtered_files = []
-                    for npz_path in view_frames[view]:
-                        frame_num_str = npz_path.stem.split("_")[-1]
-                        try:
-                            frame_num = int(frame_num_str)
-                            if (
-                                (start_frame is None or frame_num >= start_frame)
-                                and (end_frame is None or frame_num <= end_frame)
-                            ):
-                                filtered_files.append(npz_path)
-                        except ValueError:
-                            logger.warning(f"Invalid frame number in file: {npz_path}")
-                    view_frames[view] = filtered_files
+        view_frames[view] = [
+            triplet.npz_paths[view] for triplet in frame_triplets
+        ]
 
     return PersonInfo(
         person_id=person_env_dir.parent.name,
