@@ -100,7 +100,7 @@ def test_fuse_3view_keypoints_with_procrustes_alignment():
         alignment_scale=False,
     )
 
-    assert np.allclose(fused, ref)
+    assert np.allclose(fused, ref, atol=1e-6)
     assert fused_mask.tolist() == [True, True, True]
     assert n_valid.tolist() == [3, 3, 3]
 

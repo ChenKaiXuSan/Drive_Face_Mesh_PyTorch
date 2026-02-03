@@ -46,6 +46,7 @@ from head3D_fuse.mesh_3d_eval import (
 from head3D_fuse.save import _save_fused_keypoints
 
 logger = logging.getLogger(__name__)
+MIN_POINTS_FOR_ALIGNMENT = 3
 
 
 def _normalize_keypoints(keypoints: Optional[np.ndarray]) -> Optional[np.ndarray]:
@@ -98,17 +99,29 @@ def _align_keypoints_to_reference(
     ref_valid = _valid_keypoints_mask(ref, zero_eps)
     src_valid = _valid_keypoints_mask(src, zero_eps)
     pair_valid = ref_valid & src_valid
-    if pair_valid.sum() < 3:
+    if pair_valid.sum() < MIN_POINTS_FOR_ALIGNMENT:
         logger.warning(
-            "Not enough valid joints for alignment (need >=3, got %d).",
+            "Not enough valid joints for alignment (need >=%d, got %d).",
+            MIN_POINTS_FOR_ALIGNMENT,
             pair_valid.sum(),
         )
         return source
     scale, rot, translation = _estimate_similarity_transform(
         src[pair_valid], ref[pair_valid], allow_scale
     )
-    aligned = (scale * src @ rot) + translation
-    aligned[~src_valid] = source[~src_valid]
+    return _finalize_aligned_keypoints(src, source, src_valid, scale, rot, translation)
+
+
+def _finalize_aligned_keypoints(
+    source: np.ndarray,
+    raw_source: np.ndarray,
+    valid_mask: np.ndarray,
+    scale: float,
+    rot: np.ndarray,
+    translation: np.ndarray,
+) -> np.ndarray:
+    aligned = (scale * source @ rot) + translation
+    aligned[~valid_mask] = raw_source[~valid_mask]
     return aligned
 
 
@@ -144,9 +157,10 @@ def _align_keypoints_trimmed(
     ref_valid = _valid_keypoints_mask(ref, zero_eps)
     src_valid = _valid_keypoints_mask(src, zero_eps)
     pair_valid = ref_valid & src_valid
-    if pair_valid.sum() < 3:
+    if pair_valid.sum() < MIN_POINTS_FOR_ALIGNMENT:
         logger.warning(
-            "Not enough valid joints for robust alignment (need >=3, got %d).",
+            "Not enough valid joints for robust alignment (need >=%d, got %d).",
+            MIN_POINTS_FOR_ALIGNMENT,
             pair_valid.sum(),
         )
         return source
@@ -155,7 +169,7 @@ def _align_keypoints_trimmed(
     rot = np.eye(3)
     translation = np.zeros(3)
     for _ in range(max_iters):
-        if inlier_mask.sum() < 3:
+        if inlier_mask.sum() < MIN_POINTS_FOR_ALIGNMENT:
             break
         scale, rot, translation = _estimate_similarity_transform(
             src[inlier_mask], ref[inlier_mask], allow_scale
@@ -166,11 +180,9 @@ def _align_keypoints_trimmed(
         if np.array_equal(new_inlier_mask, inlier_mask):
             break
         inlier_mask = new_inlier_mask
-    if inlier_mask.sum() < 3:
+    if inlier_mask.sum() < MIN_POINTS_FOR_ALIGNMENT:
         return source
-    aligned = (scale * src @ rot) + translation
-    aligned[~src_valid] = source[~src_valid]
-    return aligned
+    return _finalize_aligned_keypoints(src, source, src_valid, scale, rot, translation)
 
 
 def _apply_view_transform(
