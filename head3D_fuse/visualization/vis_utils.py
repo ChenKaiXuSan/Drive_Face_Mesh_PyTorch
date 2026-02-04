@@ -110,6 +110,7 @@ def visualize_3d_mesh(
     img_cv2: np.ndarray, outputs: List[Dict[str, Any]], faces: np.ndarray
 ) -> List[np.ndarray]:
     """Visualize 3D mesh overlaid on image and side view"""
+    # Local import keeps optional OpenGL dependencies from loading in non-mesh flows.
     from head3D_fuse.visualization.renderer import Renderer
 
     results = []
@@ -217,13 +218,13 @@ def visualize_3d_skeleton(
 
         # 自动调整坐标轴比例，确保人体不变形
         max_range = (all_points_np.max(axis=0) - all_points_np.min(axis=0)).max() / 2.0
-        if max_range <= 0:
+        if max_range <= 1e-6:
             max_range = 1.0
         mid = (all_points_np.max(axis=0) + all_points_np.min(axis=0)) / 2.0
         ax.set_xlim(mid[0] - max_range, mid[0] + max_range)
         ax.set_ylim(mid[1] - max_range, mid[1] + max_range)
         ax.set_zlim(mid[2] - max_range, mid[2] + max_range)
-        if hasattr(ax, "set_box_aspect"):
+        if hasattr(ax, "set_box_aspect"):  # Matplotlib >= 3.3.0
             ax.set_box_aspect((1, 1, 1))
 
         # 3. 现场开始绘制
