@@ -45,14 +45,6 @@ from head3D_fuse.mesh_3d_eval import (
 from head3D_fuse.save import _save_fused_keypoints
 from head3D_fuse.visualization.merge_video import merge_frames_to_video
 
-# vis
-from head3D_fuse.visualization.vis_utils import (
-    _save_fused_visualization,
-    _save_view_visualizations,
-    visualize_3d_skeleton,
-    visualizer,
-)
-
 logger = logging.getLogger(__name__)
 MIN_POINTS_FOR_ALIGNMENT = 3
 VALID_ALIGNMENT_METHODS = ("none", "procrustes", "procrustes_trimmed")

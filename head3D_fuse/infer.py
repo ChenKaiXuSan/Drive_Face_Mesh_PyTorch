@@ -22,21 +22,18 @@ Date      	By	Comments
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Optional, cast
 
 import numpy as np
 from omegaconf import DictConfig
 from tqdm import tqdm
 
+from head3D_fuse.fuse import fuse_3view_keypoints
 from head3D_fuse.load import (
     assemble_view_npz_paths,
     compare_npz_files,
     get_annotation_dict,
     load_npz_output,
-)
-from head3D_fuse.mesh_3d_eval import (
-    evaluate_face3d_pro,
-    export_report,
 )
 
 # save
@@ -45,27 +42,70 @@ from head3D_fuse.visualization.merge_video import merge_frames_to_video
 
 # vis
 from head3D_fuse.visualization.vis_utils import (
+    _save_frame_fuse_3dkpt_visualization,
     _save_fused_visualization,
     _save_view_visualizations,
-    visualize_3d_skeleton,
     visualizer,
-    _save_frame_fuse_3dkpt_visualization,
 )
-
-from head3D_fuse.fuse import fuse_3view_keypoints
 
 logger = logging.getLogger(__name__)
 MIN_POINTS_FOR_ALIGNMENT = 3
 VALID_ALIGNMENT_METHODS = ("none", "procrustes", "procrustes_trimmed")
 
+# 定义需要保留的关键点索引：头部 + 肩部/颈部 + 双手
+KEEP_KEYPOINT_INDICES = (
+    # 头部: 鼻子、眼睛、耳朵
+    list(range(0, 5))  # 0-4: nose, left-eye, right-eye, left-ear, right-ear
+    # 肩部和颈部
+    + [5, 6]  # left-shoulder, right-shoulder
+    # 双手（包括手腕）
+    + list(range(21, 63))  # 21-62: 右手(21-41) + 左手(42-62)
+    # 肩峰和颈部
+    + [67, 68, 69]  # left-acromion, right-acromion, neck
+)
 
-def _normalize_keypoints(keypoints: Optional[np.ndarray]) -> Optional[np.ndarray]:
+
+def _normalize_keypoints(keypoints: Optional[np.ndarray]) -> np.ndarray:
+    """归一化关键点并过滤只保留头部、肩部和双手的关键点。
+
+    Args:
+        keypoints: 输入的关键点数组，形状可能是 (batch, N, 3) 或 (N, 3)
+
+    Returns:
+        过滤后的关键点数组，形状为 (M, 3)，其中M是保留的关键点数量
+        如果输入为None，返回填充NaN的数组
+    """
+    num_keep_points = len(KEEP_KEYPOINT_INDICES)
+
     if keypoints is None:
-        return None
-    keypoints = np.asarray(keypoints)
-    if keypoints.ndim == 3 and keypoints.shape[0] >= 1:
-        return keypoints[0]
-    return keypoints
+        # 当关键点缺失时，创建填充NaN的数组
+        return np.full((num_keep_points, 3), np.nan, dtype=np.float32)
+
+    # 明确类型以避免类型检查错误
+    kpt_array = cast(np.ndarray, np.asarray(keypoints))
+    assert kpt_array is not None  # 帮助类型检查器
+
+    # 处理batch维度
+    if kpt_array.ndim == 3 and kpt_array.shape[0] >= 1:
+        kpt_array = kpt_array[0]
+
+    # 过滤关键点，只保留头部、肩部和双手
+    if kpt_array.shape[0] > max(KEEP_KEYPOINT_INDICES):
+        filtered_keypoints = kpt_array[KEEP_KEYPOINT_INDICES]
+    else:
+        # 如果关键点数量不足，填充NaN
+        logger.warning(
+            "Keypoints shape %s is smaller than expected, padding with NaN",
+            kpt_array.shape,
+        )
+        filtered_keypoints = np.full((num_keep_points, 3), np.nan, dtype=np.float32)
+        # 复制可用的关键点
+        available_indices = [i for i in KEEP_KEYPOINT_INDICES if i < kpt_array.shape[0]]
+        for new_idx, old_idx in enumerate(available_indices):
+            if new_idx < num_keep_points:
+                filtered_keypoints[new_idx] = kpt_array[old_idx]
+
+    return filtered_keypoints
 
 
 # ---------------------------------------------------------------------
@@ -115,11 +155,22 @@ def process_single_person_env(
             for view, npz_path in triplet.npz_paths.items()
         }
 
-        keypoints_by_view = {
-            view: _normalize_keypoints(outputs[view].get("pred_keypoints_3d"))
-            for view in view_list
-        }
-        missing_views = [view for view, kpt in keypoints_by_view.items() if kpt is None]
+        keypoints_by_view = {}
+        for view in view_list:
+            filtered_view_3dkpt = _normalize_keypoints(
+                outputs[view].get("pred_keypoints_3d")
+            )
+            filtered_view_2dkpt = _normalize_keypoints(
+                outputs[view].get("pred_keypoints_2d")
+            )
+            keypoints_by_view[view] = filtered_view_3dkpt
+            outputs[view]["filtered_pred_keypoints_3d"] = filtered_view_3dkpt
+            outputs[view]["filtered_pred_keypoints_2d"] = filtered_view_2dkpt
+
+        # 检查是否有包含NaN的视角（表示关键点缺失或不完整）
+        missing_views = [
+            view for view, kpt in keypoints_by_view.items() if np.all(np.isnan(kpt))
+        ]
         if missing_views:
             logger.warning(
                 "Missing pred_keypoints_3d for frame %s in %s/%s (views: %s)",

@@ -888,10 +888,3 @@ pose_info = dict(
     ],
     sigmas=[],
 )
-
-# head_info = dict{
-#     "face": [0, 1, 2, 3, 4, 69],
-#     "shoulders": [5, 6, 67, 68],
-#     "hands": list(range(21, 63)) # 21番から62番まで
-
-# }

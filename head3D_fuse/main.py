@@ -42,10 +42,7 @@ def _worker(
     logger.info(f"🏃‍♂️ {_worker.__name__} 启动，分配任务数: {len(env_dirs)}")
 
     for env_dir in env_dirs:
-        try:
-            process_single_person_env(env_dir, out_root, infer_root, cfg)
-        except Exception as e:
-            logger.error(f"❌ {_worker.__name__} 处理 {env_dir.name} 时出错: {e}")
+        process_single_person_env(env_dir, out_root, infer_root, cfg)
 
     logger.info(f"🏁 {_worker.__name__} 所有任务处理完毕")
 
