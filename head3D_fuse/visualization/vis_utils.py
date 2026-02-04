@@ -21,7 +21,7 @@ Date      	By	Comments
 """
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import cv2
 import numpy as np
@@ -39,60 +39,6 @@ DUMMY_IMAGE_SIZE = (
 LIGHT_BLUE = (0.65098039, 0.74117647, 0.85882353)
 
 visualizer = SkeletonVisualizer(line_width=2, radius=5)
-
-
-def visualize_2d_results(
-    img_cv2: np.ndarray, outputs: List[Dict[str, Any]], visualizer: SkeletonVisualizer
-) -> List[np.ndarray]:
-    """Visualize 2D keypoints and bounding boxes"""
-    results = []
-
-    for pid, person_output in enumerate(outputs):
-        img_vis = img_cv2.copy()
-
-        # Draw keypoints
-        # keypoints_2d = person_output["pred_keypoints_2d"]
-        keypoints_2d = person_output["filtered_pred_keypoints_2d"]
-        keypoints_2d_vis = np.concatenate(
-            [keypoints_2d, np.ones((keypoints_2d.shape[0], 1))], axis=-1
-        )
-
-        # draw skeleton
-        for pt in keypoints_2d_vis:
-            if pt[2] > 0:
-                cv2.circle(
-                    img_vis,
-                    (int(pt[0]), int(pt[1])),
-                    visualizer.radius,
-                    (0, 0, 255),  # Red color
-                    -1,
-                )
-
-        # Draw bounding box
-        bbox = person_output["bbox"]
-        img_vis = cv2.rectangle(
-            img_vis,
-            (int(bbox[0]), int(bbox[1])),
-            (int(bbox[2]), int(bbox[3])),
-            (0, 255, 0),  # Green color
-            2,
-        )
-
-        # Add person ID text
-        cv2.putText(
-            img_vis,
-            f"Person {pid}",
-            (int(bbox[0]), int(bbox[1] - 10)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (0, 255, 0),
-            2,
-        )
-
-        results.append(img_vis)
-
-    return results
-
 
 def _save_view_visualizations(
     output: dict,
@@ -124,9 +70,13 @@ def _save_view_visualizations(
     images_to_combine.append(frame_bgr.copy())
 
     # 2. 2D keypoints visualization (中间)
-    results = visualize_2d_results(frame, outputs_list, visualizer)
-    if results and results[0] is not None:
-        images_to_combine.append(results[0])
+    results = visualizer.draw_skeleton(
+        image=frame_bgr.copy(),
+        keypoints=outputs_list[0]["pred_keypoints_2d"],
+        show_kpt_idx=False,
+    )
+    if results is not None:
+        images_to_combine.append(results)
     else:
         logger.warning("2D visualization failed for view=%s frame=%s", view, frame_idx)
         # 使用原始frame作为占位符
@@ -134,7 +84,7 @@ def _save_view_visualizations(
 
     # 3. 3D keypoints visualization (右边)
     kpt3d_img = visualizer.draw_3d_skeleton(
-        img_cv2=frame, keypoints_3d=outputs_list[0]["pred_keypoints_3d"]
+        keypoints_3d=outputs_list[0]["pred_keypoints_3d"]
     )
     if kpt3d_img is None:
         # 使用空白图像作为占位符
@@ -175,7 +125,7 @@ def _save_fused_visualization(
     outputs = [{"pred_keypoints_3d": fused_keypoints}]
     dummy_img = np.zeros((*DUMMY_IMAGE_SIZE, 3), dtype=np.uint8)
     kpt3d_img = visualizer.draw_3d_skeleton(
-        img_cv2=dummy_img, keypoints_3d=outputs[0]["pred_keypoints_3d"]
+        keypoints_3d=outputs[0]["pred_keypoints_3d"]
     )
     save_path = save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"
     cv2.imwrite(str(save_path), kpt3d_img)
@@ -204,10 +154,8 @@ def _save_frame_fuse_3dkpt_visualization(
         if img is not None:
             view_images.append(to_bgr(img.copy()))
 
-    outputs = [{"pred_keypoints_3d": fused_keypoints}]
-    dummy_img = np.zeros((*DUMMY_IMAGE_SIZE, 3), dtype=np.uint8)
     kpt3d_img = visualizer.draw_3d_skeleton(
-        img_cv2=dummy_img, keypoints_3d=outputs[0]["pred_keypoints_3d"]
+        keypoints_3d=fused_keypoints,
     )
 
     # 2. 统一左侧尺寸并堆叠

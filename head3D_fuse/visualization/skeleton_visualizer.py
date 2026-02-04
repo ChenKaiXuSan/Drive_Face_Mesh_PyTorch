@@ -5,7 +5,64 @@ from typing import Dict, Optional, Tuple, Union
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
+from typing import Optional, cast
 
+
+# 定义需要保留的关键点索引：头部 + 肩部/颈部 + 双手
+KEEP_KEYPOINT_INDICES = (
+    # 头部: 鼻子、眼睛、耳朵
+    list(range(0, 5))  # 0-4: nose, left-eye, right-eye, left-ear, right-ear
+    # 肩部和颈部
+    + [5, 6]  # left-shoulder, right-shoulder
+    # 双手（包括手腕）
+    + list(range(21, 63))  # 21-62: 右手(21-41) + 左手(42-62)
+    # 肩峰和颈部
+    + [67, 68, 69]  # left-acromion, right-acromion, neck
+)
+
+
+def _normalize_keypoints(keypoints: Optional[np.ndarray]) -> np.ndarray:
+    """归一化关键点并过滤只保留头部、肩部和双手的关键点。
+
+    Args:
+        keypoints: 输入的关键点数组，形状可能是 (batch, N, 3) 或 (N, 3)
+
+    Returns:
+        过滤后的关键点数组，形状为 (M, 3)，其中M是保留的关键点数量
+        如果输入为None，返回填充NaN的数组
+    """
+    num_keep_points = len(KEEP_KEYPOINT_INDICES)
+
+    if keypoints is None:
+        # 当关键点缺失时，创建填充NaN的数组
+        return np.full((num_keep_points, 3), np.nan, dtype=np.float32)
+
+    # 明确类型以避免类型检查错误
+    kpt_array = cast(np.ndarray, np.asarray(keypoints))
+    assert kpt_array is not None  # 帮助类型检查器
+
+    # 处理batch维度
+    if kpt_array.ndim == 3 and kpt_array.shape[0] >= 1:
+        kpt_array = kpt_array[0]
+
+    # 过滤关键点，只保留头部、肩部和双手
+    if kpt_array.shape[0] > max(KEEP_KEYPOINT_INDICES):
+        filtered_keypoints = kpt_array[KEEP_KEYPOINT_INDICES]
+    else:
+        # 如果关键点数量不足，填充NaN
+        logger.warning(
+            "Keypoints shape %s is smaller than expected, padding with NaN",
+            kpt_array.shape,
+        )
+        filtered_keypoints = np.full((num_keep_points, 3), np.nan, dtype=np.float32)
+        # 复制可用的关键点
+        available_indices = [i for i in KEEP_KEYPOINT_INDICES if i < kpt_array.shape[0]]
+        for new_idx, old_idx in enumerate(available_indices):
+            if new_idx < num_keep_points:
+                filtered_keypoints[new_idx] = kpt_array[old_idx]
+
+    return filtered_keypoints
 
 EDGES_FILTERED_IDX = [
     # ====================
@@ -106,7 +163,6 @@ class SkeletonVisualizer:
         self,
         image: np.ndarray,
         keypoints: np.ndarray,
-        kpt_thr: float = 0.3,
         show_kpt_idx: bool = False,
     ):
         """Draw keypoints and skeletons (optional) of GT or prediction.
@@ -128,44 +184,28 @@ class SkeletonVisualizer:
         if len(keypoints.shape) == 2:
             keypoints = keypoints[None, :, :]
 
-        # loop for each person
+
         for cur_keypoints in keypoints:
-            kpts = cur_keypoints[:, :-1]
-            score = cur_keypoints[:, -1]
+            kpts = cur_keypoints
 
             # draw links
             for edge in EDGES_FILTERED_IDX:
                 kpt1_idx, kpt2_idx = edge
                 if (
-                    score[kpt1_idx] < kpt_thr
-                    or score[kpt2_idx] < kpt_thr
-                    or kpts[kpt1_idx] is None
+                        kpts[kpt1_idx] is None
                     or kpts[kpt2_idx] is None
                 ):
                     # skip the edge that should not be drawn
                     continue
 
-                color = self.link_color
-                if isinstance(color, (list, tuple)) and len(color) > max(
-                    kpt1_idx, kpt2_idx
-                ):
-                    color = color[kpt1_idx]
-                if not isinstance(color, str):
-                    color = tuple(int(c) for c in color)
-
                 transparency = self.alpha
-                if self.show_keypoint_weight:
-                    transparency *= (
-                        max(0, min(1, score[kpt1_idx]))
-                        + max(0, min(1, score[kpt2_idx]))
-                    ) / 2
-
+                
                 if transparency == 1.0:
                     image = cv2.line(
                         image,
                         (int(kpts[kpt1_idx][0]), int(kpts[kpt1_idx][1])),
                         (int(kpts[kpt2_idx][0]), int(kpts[kpt2_idx][1])),
-                        color,
+                        (0, 255, 0),
                         int(self.line_width),
                     )
                 else:
@@ -173,7 +213,7 @@ class SkeletonVisualizer:
                         image.copy(),
                         (int(kpts[kpt1_idx][0]), int(kpts[kpt1_idx][1])),
                         (int(kpts[kpt2_idx][0]), int(kpts[kpt2_idx][1])),
-                        color,
+                        (0, 255, 0),
                         int(self.line_width),
                     )
                     image = cv2.addWeighted(
@@ -182,18 +222,14 @@ class SkeletonVisualizer:
 
             # draw each point on image
             for kpt_id, kpt in enumerate(kpts):
-                if score[kpt_id] < kpt_thr or kpt is None:
+                if kpt is None:
                     continue
 
-                color = self.kpt_color
-                if isinstance(color, (list, tuple)) and len(color) > kpt_id:
-                    color = color[kpt_id]
-                if not isinstance(color, str):
-                    color = tuple(int(c) for c in color)
-
+                color = (255, 0, 0)  # Default color: blue
+                
                 transparency = self.alpha
                 if self.show_keypoint_weight:
-                    transparency *= max(0, min(1, score[kpt_id]))
+                    transparency *= max(0, min(1, kpt[kpt_id]))
 
                 if transparency == 1.0:
                     image = cv2.circle(
@@ -231,7 +267,6 @@ class SkeletonVisualizer:
 
     def draw_3d_skeleton(
         self,
-        img_cv2: np.ndarray,
         keypoints_3d: np.ndarray,
     ) -> np.ndarray:
         """
@@ -245,8 +280,10 @@ class SkeletonVisualizer:
         ax.set_ylabel("Y")
         ax.set_zlabel("Z")
 
+        # filter keypoints
+        filtered_keypoints_3d = _normalize_keypoints(keypoints_3d)
         # draw point
-        for kpt in keypoints_3d:
+        for kpt in filtered_keypoints_3d:
             ax.scatter(kpt[0], kpt[1], kpt[2], c="r", marker="o")
 
         # draw links
@@ -259,6 +296,9 @@ class SkeletonVisualizer:
             zs = [kpt1[2], kpt2[2]]
             ax.plot(xs, ys, zs, c="b")
 
+        # 设置初始视角 (根据你的经验：俯视角度)
+        ax.view_init(elev=-30, azim=270)
+        
         # 4) fig -> image
         fig.canvas.draw()
         w, h = fig.canvas.get_width_height()

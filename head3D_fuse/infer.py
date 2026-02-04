@@ -157,13 +157,15 @@ def process_single_person_env(
 
         keypoints_by_view = {}
         for view in view_list:
+            # 这里虽然准备了过滤之后的结果，但是不好用
             filtered_view_3dkpt = _normalize_keypoints(
                 outputs[view].get("pred_keypoints_3d")
             )
             filtered_view_2dkpt = _normalize_keypoints(
                 outputs[view].get("pred_keypoints_2d")
             )
-            keypoints_by_view[view] = filtered_view_3dkpt
+            # keypoints_by_view[view] = filtered_view_3dkpt
+            keypoints_by_view[view] = outputs[view]["pred_keypoints_3d"]
             outputs[view]["filtered_pred_keypoints_3d"] = filtered_view_3dkpt
             outputs[view]["filtered_pred_keypoints_2d"] = filtered_view_2dkpt
 
@@ -188,6 +190,7 @@ def process_single_person_env(
         alignment_scale = cfg.infer.get("alignment_scale", True)
         alignment_trim_ratio = cfg.infer.get("alignment_trim_ratio", 0.2)
         alignment_max_iters = cfg.infer.get("alignment_max_iters", 3)
+
         fused_kpt, fused_mask, n_valid = fuse_3view_keypoints(
             keypoints_by_view,
             method=fused_method,
