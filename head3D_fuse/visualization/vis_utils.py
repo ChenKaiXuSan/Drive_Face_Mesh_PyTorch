@@ -110,9 +110,9 @@ def _save_view_visualizations(
         combined_img = np.hstack(resized_images)
 
         # 保存组合图像
-        save_dir = save_root / view / "combined"
+        save_dir = save_root / view 
         save_dir.mkdir(parents=True, exist_ok=True)
-        save_path = save_dir / f"frame_{frame_idx:06d}_combined.png"
+        save_path = save_dir / f"frame_{frame_idx:06d}.png"
         cv2.imwrite(str(save_path), combined_img)
 
 

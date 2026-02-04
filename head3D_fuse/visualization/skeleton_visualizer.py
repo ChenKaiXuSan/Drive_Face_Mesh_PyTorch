@@ -1,12 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union, cast
 
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-from pathlib import Path
-from typing import Optional, cast
 
 
 # 定义需要保留的关键点索引：头部 + 肩部/颈部 + 双手
@@ -63,6 +61,7 @@ def _normalize_keypoints(keypoints: Optional[np.ndarray]) -> np.ndarray:
                 filtered_keypoints[new_idx] = kpt_array[old_idx]
 
     return filtered_keypoints
+
 
 EDGES_FILTERED_IDX = [
     # ====================
@@ -184,22 +183,18 @@ class SkeletonVisualizer:
         if len(keypoints.shape) == 2:
             keypoints = keypoints[None, :, :]
 
-
         for cur_keypoints in keypoints:
             kpts = cur_keypoints
 
             # draw links
             for edge in EDGES_FILTERED_IDX:
                 kpt1_idx, kpt2_idx = edge
-                if (
-                        kpts[kpt1_idx] is None
-                    or kpts[kpt2_idx] is None
-                ):
+                if kpts[kpt1_idx] is None or kpts[kpt2_idx] is None:
                     # skip the edge that should not be drawn
                     continue
 
                 transparency = self.alpha
-                
+
                 if transparency == 1.0:
                     image = cv2.line(
                         image,
@@ -226,7 +221,7 @@ class SkeletonVisualizer:
                     continue
 
                 color = (255, 0, 0)  # Default color: blue
-                
+
                 transparency = self.alpha
                 if self.show_keypoint_weight:
                     transparency *= max(0, min(1, kpt[kpt_id]))
@@ -298,7 +293,7 @@ class SkeletonVisualizer:
 
         # 设置初始视角 (根据你的经验：俯视角度)
         ax.view_init(elev=-30, azim=270)
-        
+
         # 4) fig -> image
         fig.canvas.draw()
         w, h = fig.canvas.get_width_height()
