@@ -20,6 +20,8 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 import logging
+import re
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -36,6 +38,16 @@ DUMMY_IMAGE_SIZE = (
     10,
     10,
 )  # Placeholder size; visualize_3d_skeleton only uses it as a canvas.
+VISUALIZATION_BACKGROUND_COLOR = "white"
+# Threshold for near-zero ranges; assumes coordinates are in meter-scale units.
+NEAR_ZERO_RANGE_THRESHOLD = 1e-6
+DEFAULT_AXIS_RANGE = 1.0
+MATPLOTLIB_OUTPUTS_RGB = True
+BOX_ASPECT_WARNING_MESSAGE = (
+    "Matplotlib does not support set_box_aspect; update matplotlib to enable "
+    "aspect locking and avoid distorted 3D skeletons."
+)
+BOX_ASPECT_WARNING_REGEX = re.compile(rf"^{re.escape(BOX_ASPECT_WARNING_MESSAGE)}$")
 
 
 LIGHT_BLUE = (0.65098039, 0.74117647, 0.85882353)
@@ -45,6 +57,15 @@ visualizer.set_pose_meta(mhr70_pose_info)
 
 
 def _get_frame_is_rgb(output: Optional[Dict[str, Any]], default: bool = True) -> bool:
+    """Determine whether frame data is in RGB format.
+
+    Args:
+        output: Output dictionary that may include frame color metadata.
+        default: Fallback when no metadata is available.
+
+    Returns:
+        True if the frame should be treated as RGB; otherwise False.
+    """
     if not output:
         return default
     frame_is_rgb = output.get("frame_is_rgb")
@@ -57,6 +78,15 @@ def _get_frame_is_rgb(output: Optional[Dict[str, Any]], default: bool = True) ->
 
 
 def _ensure_bgr(image: Optional[np.ndarray], input_is_rgb: bool) -> Optional[np.ndarray]:
+    """Ensure image is in BGR format for OpenCV.
+
+    Args:
+        image: Input image array or None.
+        input_is_rgb: Whether the input image is RGB.
+
+    Returns:
+        The BGR image if input_is_rgb is True, otherwise the original image.
+    """
     if image is None:
         return None
     if input_is_rgb:
@@ -186,12 +216,13 @@ def visualize_3d_skeleton(
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
-    ax.set_facecolor("white")
-    fig.patch.set_facecolor("white")
+    ax.set_facecolor(VISUALIZATION_BACKGROUND_COLOR)
+    fig.patch.set_facecolor(VISUALIZATION_BACKGROUND_COLOR)
     ax.grid(False)
     ax.set_axis_off()
+    supports_box_aspect = hasattr(ax, "set_box_aspect")
 
-    # 2. 预准备颜色数据 (将 0-255 归一化到 0-1)
+    # 2. Prepare color data (normalize 0-255 to 0-1)
     kpt_colors = (
         np.array(visualizer.kpt_color, dtype=np.float32) / 255.0
         if visualizer.kpt_color is not None
@@ -205,7 +236,7 @@ def visualize_3d_skeleton(
 
     has_data = False
 
-    # 获取所有人的坐标以统一缩放比例（防止每个人比例不一致）
+    # Collect all points to unify scale across people.
     all_points = []
     for target in outputs:
         pts = target.get("pred_keypoints_3d")
@@ -216,26 +247,41 @@ def visualize_3d_skeleton(
         has_data = True
         all_points_np = np.concatenate(all_points, axis=0)
 
-        # 自动调整坐标轴比例，确保人体不变形
+        # Auto-adjust axis scale to avoid distortion.
         max_range = (all_points_np.max(axis=0) - all_points_np.min(axis=0)).max() / 2.0
-        if max_range <= 1e-6:
-            max_range = 1.0
+        if max_range <= NEAR_ZERO_RANGE_THRESHOLD:
+            logger.debug(
+                "3D skeleton range near zero (%.6f); using default axis range.",
+                max_range,
+            )
+            max_range = DEFAULT_AXIS_RANGE
         mid = (all_points_np.max(axis=0) + all_points_np.min(axis=0)) / 2.0
         ax.set_xlim(mid[0] - max_range, mid[0] + max_range)
         ax.set_ylim(mid[1] - max_range, mid[1] + max_range)
         ax.set_zlim(mid[2] - max_range, mid[2] + max_range)
-        if hasattr(ax, "set_box_aspect"):  # Matplotlib >= 3.3.0
+        if supports_box_aspect:  # Matplotlib versions that support aspect lock.
             ax.set_box_aspect((1, 1, 1))
+        else:
+            warnings.warn(
+                BOX_ASPECT_WARNING_MESSAGE,
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            warnings.filterwarnings(
+                "ignore",
+                message=BOX_ASPECT_WARNING_REGEX,
+                category=RuntimeWarning,
+            )
 
-        # 3. 现场开始绘制
+        # 3. Begin rendering
         for i, target in enumerate(outputs):
             pts_3d = target.get("pred_keypoints_3d")
             if pts_3d is None:
                 continue
             if pts_3d.ndim == 3:
-                pts_3d = pts_3d[0]  # 处理 (1, N, 3)
+                pts_3d = pts_3d[0]  # Handle (1, N, 3)
 
-            # 绘制关键点
+            # Draw keypoints.
             ax.scatter(
                 pts_3d[:, 0],
                 pts_3d[:, 1],
@@ -245,7 +291,7 @@ def visualize_3d_skeleton(
                 alpha=getattr(visualizer, "alpha", 0.8),
             )
 
-            # 绘制骨架连线
+            # Draw skeleton links.
             if visualizer.skeleton is not None:
                 for j, (p1_idx, p2_idx) in enumerate(visualizer.skeleton):
                     if p1_idx < len(pts_3d) and p2_idx < len(pts_3d):
@@ -267,17 +313,17 @@ def visualize_3d_skeleton(
     if not has_data:
         ax.text(0.5, 0.5, 0.5, "No Data", ha="center")
 
-    # 设置初始视角 (根据你的经验：俯视角度)
+    # Set initial view angle (top-down).
     ax.view_init(elev=-30, azim=270)
 
-    # 4. 转换为图像数组
-    fig.tight_layout(pad=0)
+    # 4. Convert to image array.
+    fig.tight_layout(pad=0.1)
     fig.canvas.draw()
     w, h = fig.canvas.get_width_height()
     img_3d = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
     img_3d = img_3d.reshape((h, w, 4))[:, :, :3]  # 去掉 alpha 通道
 
-    # 4. 关闭 fig 释放内存
+    # 4. Close fig to release memory.
     plt.close(fig)
     return img_3d
 
@@ -297,6 +343,9 @@ def _save_view_visualizations(
         return
     frame_is_rgb = _get_frame_is_rgb(output)
     frame_bgr = _ensure_bgr(frame, frame_is_rgb)
+    if frame_bgr is None:
+        logger.warning("Missing frame data for view=%s frame=%s", view, frame_idx)
+        return
 
     # Visualization helpers expect a list of outputs, even for a single person.
     outputs_list = [output]
@@ -326,7 +375,7 @@ def _save_view_visualizations(
                 frame_idx,
             )
         else:
-            kpt3d_bgr = _ensure_bgr(kpt3d_img, True)
+            kpt3d_bgr = _ensure_bgr(kpt3d_img, MATPLOTLIB_OUTPUTS_RGB)
             cv2.imwrite(
                 str(save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"), kpt3d_bgr
             )
@@ -344,7 +393,7 @@ def _save_fused_visualization(
         img_cv2=dummy_img, outputs=outputs, visualizer=visualizer
     )
     save_path = save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"
-    kpt3d_bgr = _ensure_bgr(kpt3d_img, True)
+    kpt3d_bgr = _ensure_bgr(kpt3d_img, MATPLOTLIB_OUTPUTS_RGB)
     cv2.imwrite(str(save_path), kpt3d_bgr)
     return dummy_img
 
@@ -365,7 +414,9 @@ def _save_frame_fuse_3dkpt_visualization(
         img = output.get("frame")
         if img is not None:
             frame_is_rgb = _get_frame_is_rgb(output)
-            view_images.append(_ensure_bgr(img.copy(), frame_is_rgb))
+            converted = _ensure_bgr(img, frame_is_rgb)
+            if converted is not None:
+                view_images.append(converted)
         else:
             logger.warning("Missing frame for view=%s frame=%s", key, frame_idx)
 
@@ -374,40 +425,40 @@ def _save_frame_fuse_3dkpt_visualization(
     kpt3d_img = visualize_3d_skeleton(
         img_cv2=dummy_img, outputs=outputs, visualizer=visualizer
     )
-    kpt3d_bgr = _ensure_bgr(kpt3d_img, True)
+    kpt3d_bgr = _ensure_bgr(kpt3d_img, MATPLOTLIB_OUTPUTS_RGB)
 
     if not view_images:
         logger.warning(
             "No view images available for frame=%s; saving fused 3D keypoints only.",
             frame_idx,
         )
-        save_path = save_dir / f"fused_{frame_idx:06d}.png"
+        save_path = save_dir / f"fused_{frame_idx:06d}_3d_only.png"
         cv2.imwrite(str(save_path), kpt3d_bgr)
         return save_path
 
-    # 2. 统一左侧尺寸并堆叠
-    # 假设以第一张视角图的原始大小为准
+    # 2. Unify left column size and stack.
+    # Assume the first view image's original size as reference.
     v_h, v_w = view_images[0].shape[:2]
     resized_views = [cv2.resize(img, (v_w, v_h)) for img in view_images]
     left_column = np.vstack(resized_views)
 
-    total_h = left_column.shape[0]  # 左侧总高度
+    total_h = left_column.shape[0]  # Left column total height.
 
-    # 3. 重点：确保右侧图不是黑的，并且拉伸到 total_h
+    # 3. Ensure right-side image is not black and stretch to total_h.
     f_h, f_w = kpt3d_bgr.shape[:2]
 
-    # 计算右侧图为了匹配高度所需的宽度
+    # Compute right-side width to match height.
     new_f_w = int(f_w * (total_h / f_h))
 
-    # 使用 CUBIC 插值放大，确保清晰
+    # Resize with cubic interpolation for clarity.
     right_column = cv2.resize(
         kpt3d_bgr, (new_f_w, total_h), interpolation=cv2.INTER_CUBIC
     )
 
-    # 4. 左右拼接
+    # 4. Concatenate left and right columns.
     final_visualization = np.hstack([left_column, right_column])
 
-    # 5. 保存
+    # 5. Save.
     save_path = save_dir / f"fused_{frame_idx:06d}.png"
     cv2.imwrite(str(save_path), final_visualization)
 
