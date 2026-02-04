@@ -29,7 +29,6 @@ import numpy as np
 from omegaconf import DictConfig
 
 from head3D_fuse.metadata.mhr70 import pose_info as mhr70_pose_info
-from head3D_fuse.visualization.renderer import Renderer
 from head3D_fuse.visualization.skeleton_visualizer import SkeletonVisualizer
 
 logger = logging.getLogger(__name__)
@@ -43,6 +42,26 @@ LIGHT_BLUE = (0.65098039, 0.74117647, 0.85882353)
 
 visualizer = SkeletonVisualizer(line_width=2, radius=5)
 visualizer.set_pose_meta(mhr70_pose_info)
+
+
+def _get_frame_is_rgb(output: Optional[Dict[str, Any]], default: bool = True) -> bool:
+    if not output:
+        return default
+    frame_is_rgb = output.get("frame_is_rgb")
+    if frame_is_rgb is not None:
+        return bool(frame_is_rgb)
+    frame_color = output.get("frame_color")
+    if isinstance(frame_color, str):
+        return frame_color.lower() != "bgr"
+    return default
+
+
+def _ensure_bgr(image: Optional[np.ndarray], input_is_rgb: bool) -> Optional[np.ndarray]:
+    if image is None:
+        return None
+    if input_is_rgb:
+        return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    return image
 
 
 def visualize_2d_results(
@@ -91,6 +110,8 @@ def visualize_3d_mesh(
     img_cv2: np.ndarray, outputs: List[Dict[str, Any]], faces: np.ndarray
 ) -> List[np.ndarray]:
     """Visualize 3D mesh overlaid on image and side view"""
+    from head3D_fuse.visualization.renderer import Renderer
+
     results = []
 
     for pid, person_output in enumerate(outputs):
@@ -164,6 +185,10 @@ def visualize_3d_skeleton(
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
+    ax.set_facecolor("white")
+    fig.patch.set_facecolor("white")
+    ax.grid(False)
+    ax.set_axis_off()
 
     # 2. 预准备颜色数据 (将 0-255 归一化到 0-1)
     kpt_colors = (
@@ -192,10 +217,14 @@ def visualize_3d_skeleton(
 
         # 自动调整坐标轴比例，确保人体不变形
         max_range = (all_points_np.max(axis=0) - all_points_np.min(axis=0)).max() / 2.0
+        if max_range <= 0:
+            max_range = 1.0
         mid = (all_points_np.max(axis=0) + all_points_np.min(axis=0)) / 2.0
         ax.set_xlim(mid[0] - max_range, mid[0] + max_range)
         ax.set_ylim(mid[1] - max_range, mid[1] + max_range)
         ax.set_zlim(mid[2] - max_range, mid[2] + max_range)
+        if hasattr(ax, "set_box_aspect"):
+            ax.set_box_aspect((1, 1, 1))
 
         # 3. 现场开始绘制
         for i, target in enumerate(outputs):
@@ -241,6 +270,7 @@ def visualize_3d_skeleton(
     ax.view_init(elev=-30, azim=270)
 
     # 4. 转换为图像数组
+    fig.tight_layout(pad=0)
     fig.canvas.draw()
     w, h = fig.canvas.get_width_height()
     img_3d = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
@@ -264,6 +294,8 @@ def _save_view_visualizations(
     if frame is None:
         logger.warning("Missing frame for view=%s frame=%s", view, frame_idx)
         return
+    frame_is_rgb = _get_frame_is_rgb(output)
+    frame_bgr = _ensure_bgr(frame, frame_is_rgb)
 
     # Visualization helpers expect a list of outputs, even for a single person.
     outputs_list = [output]
@@ -272,7 +304,7 @@ def _save_view_visualizations(
         save_dir = save_root / view / "2d"
         save_dir.mkdir(parents=True, exist_ok=True)
         # visualize_2d_results returns a list; the first entry corresponds to the single output.
-        results = visualize_2d_results(frame, outputs_list, visualizer)
+        results = visualize_2d_results(frame_bgr, outputs_list, visualizer)
         if not results or results[0] is None:
             logger.warning(
                 "2D visualization failed for view=%s frame=%s", view, frame_idx
@@ -293,7 +325,10 @@ def _save_view_visualizations(
                 frame_idx,
             )
         else:
-            cv2.imwrite(str(save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"), kpt3d_img)
+            kpt3d_bgr = _ensure_bgr(kpt3d_img, True)
+            cv2.imwrite(
+                str(save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"), kpt3d_bgr
+            )
 
 
 def _save_fused_visualization(
@@ -308,7 +343,8 @@ def _save_fused_visualization(
         img_cv2=dummy_img, outputs=outputs, visualizer=visualizer
     )
     save_path = save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"
-    cv2.imwrite(str(save_path), kpt3d_img)
+    kpt3d_bgr = _ensure_bgr(kpt3d_img, True)
+    cv2.imwrite(str(save_path), kpt3d_bgr)
     return dummy_img
 
 
@@ -321,44 +357,50 @@ def _save_frame_fuse_3dkpt_visualization(
 ) -> Path:
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. 提取并转换颜色 (RGB -> BGR)
-    def to_bgr(img):
-        # 如果图片颜色看起来发蓝，取消下面这一行的注释
-        # return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-        return img
-
     view_images = []
     sorted_keys = sorted(outputs.keys())
     for key in sorted_keys[:3]:
-        img = outputs[key].get("frame")
+        output = outputs[key]
+        img = output.get("frame")
         if img is not None:
-            view_images.append(to_bgr(img.copy()))
+            frame_is_rgb = _get_frame_is_rgb(output)
+            view_images.append(_ensure_bgr(img.copy(), frame_is_rgb))
+        else:
+            logger.warning("Missing frame for view=%s frame=%s", key, frame_idx)
 
     outputs = [{"pred_keypoints_3d": fused_keypoints}]
     dummy_img = np.zeros((*DUMMY_IMAGE_SIZE, 3), dtype=np.uint8)
     kpt3d_img = visualize_3d_skeleton(
         img_cv2=dummy_img, outputs=outputs, visualizer=visualizer
     )
+    kpt3d_bgr = _ensure_bgr(kpt3d_img, True)
+
+    if not view_images:
+        logger.warning(
+            "No view images available for frame=%s; saving fused 3D keypoints only.",
+            frame_idx,
+        )
+        save_path = save_dir / f"fused_{frame_idx:06d}.png"
+        cv2.imwrite(str(save_path), kpt3d_bgr)
+        return save_path
 
     # 2. 统一左侧尺寸并堆叠
     # 假设以第一张视角图的原始大小为准
     v_h, v_w = view_images[0].shape[:2]
-    # bgr to rgb
-    view_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in view_images]
     resized_views = [cv2.resize(img, (v_w, v_h)) for img in view_images]
     left_column = np.vstack(resized_views)
 
     total_h = left_column.shape[0]  # 左侧总高度
 
     # 3. 重点：确保右侧图不是黑的，并且拉伸到 total_h
-    f_h, f_w = kpt3d_img.shape[:2]
+    f_h, f_w = kpt3d_bgr.shape[:2]
 
     # 计算右侧图为了匹配高度所需的宽度
     new_f_w = int(f_w * (total_h / f_h))
 
     # 使用 CUBIC 插值放大，确保清晰
     right_column = cv2.resize(
-        kpt3d_img, (new_f_w, total_h), interpolation=cv2.INTER_CUBIC
+        kpt3d_bgr, (new_f_w, total_h), interpolation=cv2.INTER_CUBIC
     )
 
     # 4. 左右拼接
