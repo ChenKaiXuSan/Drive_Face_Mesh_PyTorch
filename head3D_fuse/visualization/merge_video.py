@@ -33,15 +33,17 @@ def merge_frames_to_video(
 ) -> None:
     """
     将指定目录下的图像帧合并为视频。
-    frame_dir: 图像帧目录，假设命名格式为 frame_0000.png, frame_0001.png, ...
+    frame_dir: 图像帧目录，假设命名格式为 frame_0000.jpg, frame_0001.jpg, ...
     output_video_path: 输出视频路径
     fps: 视频帧率
     """
 
     if frame_dir.exists() is False:
         raise ValueError(f"Frame directory does not exist: {frame_dir}")
+    if not output_video_path.parent.exists():
+        output_video_path.parent.mkdir(parents=True, exist_ok=True)
 
-    frame_files = sorted(frame_dir.glob("frame_*.png"))
+    frame_files = sorted(frame_dir.glob("*.png"))
 
     if not frame_files:
         raise ValueError(f"No frames found in directory: {frame_dir}")

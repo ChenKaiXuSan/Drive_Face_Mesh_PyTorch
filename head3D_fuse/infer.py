@@ -100,7 +100,12 @@ def process_single_person_env(
     diff_reports = []
     fused_method = cfg.infer.get("fuse_method", "median")
 
-    for triplet in tqdm(frame_triplets, desc=f"Fusing {person_id}/{env_name}"):
+    for i, triplet in enumerate(
+        tqdm(frame_triplets, desc=f"Fusing {person_id}/{env_name}")
+    ):
+        # if i == 60:
+        #     break  # for debug
+
         diff = compare_npz_files(triplet.npz_paths)
         if diff:
             diff_reports.append(diff)
@@ -199,7 +204,7 @@ def process_single_person_env(
 
     # 融合frame到video
     merge_frames_to_video(
-        frame_dir=out_root / person_id / env_name / "vis" / "fused_3d_keypoints",
+        frame_dir=out_root / person_id / env_name / "vis" / "vis_together",
         output_video_path=out_root
         / person_id
         / env_name

@@ -343,6 +343,8 @@ def _save_frame_fuse_3dkpt_visualization(
     # 2. 统一左侧尺寸并堆叠
     # 假设以第一张视角图的原始大小为准
     v_h, v_w = view_images[0].shape[:2]
+    # bgr to rgb
+    view_images = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in view_images]
     resized_views = [cv2.resize(img, (v_w, v_h)) for img in view_images]
     left_column = np.vstack(resized_views)
 
@@ -363,7 +365,7 @@ def _save_frame_fuse_3dkpt_visualization(
     final_visualization = np.hstack([left_column, right_column])
 
     # 5. 保存
-    save_path = save_dir / f"fused_{frame_idx:06d}.jpg"
+    save_path = save_dir / f"fused_{frame_idx:06d}.png"
     cv2.imwrite(str(save_path), final_visualization)
 
     return save_path
