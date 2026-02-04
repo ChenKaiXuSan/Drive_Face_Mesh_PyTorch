@@ -8,9 +8,5 @@
 			"name": "data",
 			"path": "/workspace/data"
 		},
-		{
-			"name": "workspace",
-			"path": "/workspace"
-		}
 	]
 }

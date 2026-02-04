@@ -20,30 +20,10 @@ Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
 
-import json
 import logging
-from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import numpy as np
-from omegaconf import DictConfig
-from tqdm import tqdm
-
-from head3D_fuse.load import (
-    assemble_view_npz_paths,
-    compare_npz_files,
-    get_annotation_dict,
-    load_npz_output,
-)
-
-from head3D_fuse.mesh_3d_eval import (
-    evaluate_face3d_pro,
-    export_report,
-)
-
-# save
-from head3D_fuse.save import _save_fused_keypoints
-from head3D_fuse.visualization.merge_video import merge_frames_to_video
 
 logger = logging.getLogger(__name__)
 MIN_POINTS_FOR_ALIGNMENT = 3
@@ -257,8 +237,7 @@ def _apply_view_transform(
             raise ValueError("camera_to_world mode requires 't' or 'C' translation")
         return (keypoints @ R.T) + camera_center
     raise ValueError(
-        "transform_mode must be 'world_to_camera' or 'camera_to_world', "
-        f"got '{mode}'"
+        f"transform_mode must be 'world_to_camera' or 'camera_to_world', got '{mode}'"
     )
 
 
