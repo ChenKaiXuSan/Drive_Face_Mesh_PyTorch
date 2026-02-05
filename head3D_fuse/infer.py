@@ -300,7 +300,7 @@ def process_single_person_env(
     # ===================================================================
     # 对融合后的关键点进行时间平滑处理
     # ===================================================================
-    if all_fused_kpts and cfg.infer.get("enable_temporal_smooth", True):
+    if all_fused_kpts and cfg.smooth.get("enable_temporal_smooth", False):
         logger.info(f"Applying temporal smoothing to {len(all_fused_kpts)} frames...")
         
         # 1. 将字典转换为 numpy 数组 (T, N, 3)
@@ -309,20 +309,20 @@ def process_single_person_env(
         logger.info(f"Keypoints array shape: {keypoints_array.shape}")
         
         # 2. 根据方法准备参数
-        smooth_method = cfg.infer.get("temporal_smooth_method", "gaussian")
+        smooth_method = cfg.smooth.get("temporal_smooth_method", "gaussian")
         smooth_kwargs = {}
         
         if smooth_method == "gaussian":
-            smooth_kwargs["sigma"] = cfg.infer.get("temporal_smooth_sigma", 1.5)
+            smooth_kwargs["sigma"] = cfg.smooth.get("temporal_smooth_sigma", 1.5)
         elif smooth_method == "savgol":
-            smooth_kwargs["window_length"] = cfg.infer.get("temporal_smooth_window_length", 11)
-            smooth_kwargs["polyorder"] = cfg.infer.get("temporal_smooth_polyorder", 3)
+            smooth_kwargs["window_length"] = cfg.smooth.get("temporal_smooth_window_length", 11)
+            smooth_kwargs["polyorder"] = cfg.smooth.get("temporal_smooth_polyorder", 3)
         elif smooth_method == "kalman":
-            smooth_kwargs["process_variance"] = cfg.infer.get("temporal_smooth_process_variance", 1e-5)
-            smooth_kwargs["measurement_variance"] = cfg.infer.get("temporal_smooth_measurement_variance", 1e-2)
+            smooth_kwargs["process_variance"] = cfg.smooth.get("temporal_smooth_process_variance", 1e-5)
+            smooth_kwargs["measurement_variance"] = cfg.smooth.get("temporal_smooth_measurement_variance", 1e-2)
         elif smooth_method == "bilateral":
-            smooth_kwargs["sigma_space"] = cfg.infer.get("temporal_smooth_sigma_space", 1.5)
-            smooth_kwargs["sigma_range"] = cfg.infer.get("temporal_smooth_sigma_range", 0.1)
+            smooth_kwargs["sigma_space"] = cfg.smooth.get("temporal_smooth_sigma_space", 1.5)
+            smooth_kwargs["sigma_range"] = cfg.smooth.get("temporal_smooth_sigma_range", 0.1)
         
         # 3. 执行平滑
         smoothed_array = smooth_keypoints_sequence(
@@ -377,7 +377,7 @@ def process_single_person_env(
     # ===================================================================
     # 比较平滑前后的差异并生成报告
     # ===================================================================
-    if all_fused_kpts and cfg.infer.get("enable_temporal_smooth", True) and cfg.infer.get("enable_comparison", True):
+    if all_fused_kpts and cfg.smooth.get("enable_temporal_smooth", False) and cfg.smooth.get("enable_comparison", False):
         logger.info("=" * 70)
         logger.info("Comparing fused and smoothed keypoints...")
         logger.info("=" * 70)
@@ -386,9 +386,12 @@ def process_single_person_env(
             # 创建比较器
             comparator = KeypointsComparator(keypoints_array, smoothed_array)
             
-            # 计算所有指标
-            metrics = comparator.compute_metrics()
-            logger.info(f"Computed {len(metrics)} metrics")
+            # 获取要评估的关键点索引
+            keypoint_indices = cfg.smooth.get("comparison_keypoint_indices", list(range(7)))
+            
+            # 计算所有指标（按索引过滤）
+            metrics = comparator.compute_metrics(keypoint_indices=keypoint_indices)
+            logger.info(f"Computed {len(metrics)} metrics for keypoints {keypoint_indices}")
             
             # 设置输出目录
             comparison_dir = out_root / person_id / env_name / "comparison"
@@ -400,9 +403,9 @@ def process_single_person_env(
                 json.dump(metrics, f, ensure_ascii=False, indent=2)
             logger.info(f"✓ Saved metrics to {metrics_path}")
             
-            # 2. 生成并保存详细报告
+            # 2. 生成并保存详细报告（按索引）
             report_path = comparison_dir / "smoothing_comparison_report.txt"
-            report = comparator.generate_report(save_path=report_path)
+            report = comparator.generate_report(save_path=report_path, keypoint_indices=keypoint_indices)
             logger.info(f"✓ Saved report to {report_path}")
             
             # 打印关键指标到日志
@@ -414,21 +417,21 @@ def process_single_person_env(
             logger.info("")
             
             # 3. 生成可视化图表（如果配置启用）
-            if cfg.infer.get("enable_comparison_plots", True):
+            if cfg.smooth.get("enable_comparison_plots", True):
                 logger.info("Generating comparison plots...")
                 
-                # 轨迹对比图（选择代表性的关键点）
-                keypoint_indices = cfg.infer.get("comparison_keypoint_indices", [0, 5, 10])
+                # 轨迹对比图（显示0-6关键点的X、Y、Z）
                 trajectory_plot_path = comparison_dir / "trajectory_comparison.png"
                 comparator.plot_comparison(
                     save_path=trajectory_plot_path,
                     keypoint_indices=keypoint_indices
                 )
                 logger.info(f"✓ Saved trajectory plot to {trajectory_plot_path}")
+                logger.info(f"  Visualized keypoints: {keypoint_indices}")
                 
-                # 指标对比图
+                # 指标对比图（按索引过滤）
                 metrics_plot_path = comparison_dir / "metrics_comparison.png"
-                comparator.plot_metrics(save_path=metrics_plot_path)
+                comparator.plot_metrics(save_path=metrics_plot_path, keypoint_indices=keypoint_indices)
                 logger.info(f"✓ Saved metrics plot to {metrics_plot_path}")
             
             logger.info("=" * 70)

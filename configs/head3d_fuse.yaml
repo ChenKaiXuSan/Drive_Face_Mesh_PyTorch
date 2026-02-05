@@ -84,7 +84,7 @@ smooth:
   enable_comparison_plots: true
   
   # 要在轨迹图中显示的关键点索引
-  comparison_keypoint_indices: [0, 5, 10, 21, 42]  # 鼻子、肩膀、手腕等
+  comparison_keypoint_indices: [0, 1, 2, 3, 4, 5, 6]  # 头部，肩膀
 
 
 # ========================================

@@ -101,9 +101,12 @@ class KeypointsComparator:
         jitter_score = np.mean(np.std(accel_mag, axis=0))
         return float(jitter_score)
 
-    def compute_metrics(self) -> Dict[str, float]:
+    def compute_metrics(self, keypoint_indices: Optional[List[int]] = None) -> Dict[str, float]:
         """
         计算所有评估指标
+
+        Args:
+            keypoint_indices: 要计算的关键点索引（None表示所有关键点）
 
         Returns:
             包含各种指标的字典
@@ -111,9 +114,17 @@ class KeypointsComparator:
         point_wise = self.compute_point_wise_difference()
         frame_wise = self.compute_frame_wise_difference()
 
+        # 如果指定了关键点索引，只选择这些关键点
+        if keypoint_indices is not None:
+            point_wise = point_wise[:, keypoint_indices]
+            frame_wise = np.mean(point_wise, axis=1)
+
         # 平滑度指标
-        fused_vel, fused_accel = self.compute_smoothness(self.fused_kpts)
-        smooth_vel, smooth_accel = self.compute_smoothness(self.smoothed_kpts)
+        fused_kpts_subset = self.fused_kpts if keypoint_indices is None else self.fused_kpts[:, keypoint_indices, :]
+        smoothed_kpts_subset = self.smoothed_kpts if keypoint_indices is None else self.smoothed_kpts[:, keypoint_indices, :]
+        
+        fused_vel, fused_accel = self.compute_smoothness(fused_kpts_subset)
+        smooth_vel, smooth_accel = self.compute_smoothness(smoothed_kpts_subset)
 
         metrics = {
             # 差异指标
@@ -126,6 +137,7 @@ class KeypointsComparator:
             "smoothed_mean_velocity": float(np.mean(smooth_vel)),
             "velocity_reduction": float(
                 (np.mean(fused_vel) - np.mean(smooth_vel)) / np.mean(fused_vel) * 100
+                if np.mean(fused_vel) > 0 else 0
             ),
             # 加速度指标（抖动）
             "fused_mean_acceleration": float(np.mean(fused_accel)),
@@ -134,14 +146,16 @@ class KeypointsComparator:
                 (np.mean(fused_accel) - np.mean(smooth_accel))
                 / np.mean(fused_accel)
                 * 100
+                if np.mean(fused_accel) > 0 else 0
             ),
             # 抖动分数
-            "fused_jitter": self.compute_jitter(self.fused_kpts),
-            "smoothed_jitter": self.compute_jitter(self.smoothed_kpts),
+            "fused_jitter": self.compute_jitter(fused_kpts_subset),
+            "smoothed_jitter": self.compute_jitter(smoothed_kpts_subset),
             "jitter_reduction": float(
-                (self.compute_jitter(self.fused_kpts) - self.compute_jitter(self.smoothed_kpts))
-                / self.compute_jitter(self.fused_kpts)
+                (self.compute_jitter(fused_kpts_subset) - self.compute_jitter(smoothed_kpts_subset))
+                / self.compute_jitter(fused_kpts_subset)
                 * 100
+                if self.compute_jitter(fused_kpts_subset) > 0 else 0
             ),
         }
 
@@ -204,12 +218,13 @@ class KeypointsComparator:
 
         plt.close()
 
-    def plot_metrics(self, save_path: Optional[Path] = None):
+    def plot_metrics(self, save_path: Optional[Path] = None, keypoint_indices: Optional[List[int]] = None):
         """
         绘制评估指标图
 
         Args:
             save_path: 保存路径
+            keypoint_indices: 要显示的关键点索引（None表示所有关键点）
         """
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
 
@@ -254,15 +269,30 @@ class KeypointsComparator:
         ax.legend()
         ax.grid(True, alpha=0.3)
 
-        # 4. 关键点差异分布
+        # 4. 关键点差异分布（支持按索引过滤）
         ax = axes[1, 1]
         point_wise = self.compute_point_wise_difference()
-        kpt_diff_mean = np.mean(point_wise, axis=0)
+        
+        if keypoint_indices is not None:
+            # 只显示指定关键点的差异
+            point_wise_filtered = point_wise[:, keypoint_indices]
+            kpt_diff_mean = np.mean(point_wise_filtered, axis=0)
+            x_labels = [str(idx) for idx in keypoint_indices]
+            x_positions = range(len(keypoint_indices))
+            title_suffix = f" (Keypoints: {keypoint_indices})"
+        else:
+            # 显示所有关键点的差异
+            kpt_diff_mean = np.mean(point_wise, axis=0)
+            x_positions = range(len(kpt_diff_mean))
+            x_labels = [str(i) for i in range(self.N)]
+            title_suffix = " (All)"
 
-        ax.bar(range(len(kpt_diff_mean)), kpt_diff_mean)
-        ax.set_title("Mean Difference per Keypoint")
+        ax.bar(x_positions, kpt_diff_mean, color='steelblue', alpha=0.7)
+        ax.set_title(f"Mean Difference per Keypoint{title_suffix}")
         ax.set_xlabel("Keypoint Index")
         ax.set_ylabel("Mean L2 Distance")
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(x_labels, rotation=45 if len(x_labels) > 10 else 0)
         ax.grid(True, alpha=0.3, axis="y")
 
         plt.tight_layout()
@@ -275,17 +305,18 @@ class KeypointsComparator:
 
         plt.close()
 
-    def generate_report(self, save_path: Optional[Path] = None) -> str:
+    def generate_report(self, save_path: Optional[Path] = None, keypoint_indices: Optional[List[int]] = None) -> str:
         """
         生成文本报告
 
         Args:
             save_path: 保存路径
+            keypoint_indices: 要计算的关键点索引（None表示所有关键点）
 
         Returns:
             报告文本
         """
-        metrics = self.compute_metrics()
+        metrics = self.compute_metrics(keypoint_indices=keypoint_indices)
 
         report = []
         report.append("=" * 70)
@@ -294,6 +325,8 @@ class KeypointsComparator:
         report.append(f"\n数据概览:")
         report.append(f"  帧数: {self.T}")
         report.append(f"  关键点数: {self.N}")
+        if keypoint_indices is not None:
+            report.append(f"  评估关键点: {keypoint_indices} ({len(keypoint_indices)} 个)")
         report.append(f"  数据形状: {self.fused_kpts.shape}")
 
         report.append(f"\n" + "-" * 70)
