@@ -45,4 +45,4 @@ def _save_fused_keypoints(
         "npz_paths": {view: str(path) for view, path in npz_paths.items()},
     }
     np.save(save_path, payload)
-    logger.info(f"Fused keypoints saved → {save_path}")
+    return save_path

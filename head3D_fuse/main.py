@@ -25,10 +25,12 @@ logger = logging.getLogger(__name__)
 
 def _configure_worker_logging(log_root: Path, worker_id: int, env_dirs: List[Path]) -> None:
     """Configure per-worker logging to files named by person and env."""
+    log_root = log_root / "workers_logs"
     log_root.mkdir(parents=True, exist_ok=True)
     
     # 为该worker创建日志汇总文件
     worker_log_path = log_root / f"worker_{worker_id}.log"
+    worker_log_path.parent.mkdir(parents=True, exist_ok=True)
 
     root_logger = logging.getLogger()
     for handler in list(root_logger.handlers):
@@ -87,7 +89,7 @@ def _worker(
         
         # 创建该env的独立日志文件
         log_filename = f"{person_id}_{env_name}.log"
-        log_path = out_root / log_filename
+        log_path = out_root / "env_logs" / log_filename
         log_path.parent.mkdir(parents=True, exist_ok=True)
         
         formatter = logging.Formatter(
