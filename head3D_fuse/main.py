@@ -23,6 +23,30 @@ from head3D_fuse.infer import process_single_person_env
 logger = logging.getLogger(__name__)
 
 
+def _configure_worker_logging(log_root: Path, worker_id: int) -> None:
+    """Configure per-worker logging to a dedicated file."""
+    log_root.mkdir(parents=True, exist_ok=True)
+    log_path = log_root / f"worker_{worker_id}.log"
+
+    root_logger = logging.getLogger()
+    for handler in list(root_logger.handlers):
+        root_logger.removeHandler(handler)
+
+    formatter = logging.Formatter(
+        "%(asctime)s | %(processName)s | %(levelname)s | %(name)s | %(message)s"
+    )
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(stream_handler)
+
+
 # ---------------------------------------------------------------------
 # Worker：进程执行函数
 # ---------------------------------------------------------------------
@@ -31,20 +55,26 @@ def _worker(
     out_root: Path,
     infer_root: Path,
     cfg_dict: dict,
+    worker_id: int,
 ):
     """
     每个进程的入口：设置环境变量，并处理分配的任务列表
     """
 
-    # 1. 将字典转回 Hydra 配置（多进程传递对象时，转为字典更安全）
+    # 1. 配置每个进程独立的日志输出
+    _configure_worker_logging(out_root, worker_id)
+
+    # 2. 将字典转回 Hydra 配置（多进程传递对象时，转为字典更安全）
     cfg = OmegaConf.create(cfg_dict)
 
-    logger.info(f"🏃‍♂️ {_worker.__name__} 启动，分配任务数: {len(env_dirs)}")
+    logger.info(
+        f"🏃‍♂️ {_worker.__name__} 启动，Worker {worker_id} 任务数: {len(env_dirs)}"
+    )
 
     for env_dir in env_dirs:
         process_single_person_env(env_dir, out_root, infer_root, cfg)
 
-    logger.info(f"🏁 {_worker.__name__} 所有任务处理完毕")
+    logger.info(f"🏁 {_worker.__name__} Worker {worker_id} 所有任务处理完毕")
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="head3d_fuse")
@@ -115,6 +145,7 @@ def main(cfg: DictConfig) -> None:
                 log_root,
                 infer_root,
                 cfg_dict,
+                i,
             ),
         )
         p.start()

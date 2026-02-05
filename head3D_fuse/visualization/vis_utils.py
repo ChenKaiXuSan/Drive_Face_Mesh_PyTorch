@@ -116,22 +116,6 @@ def _save_view_visualizations(
         cv2.imwrite(str(save_path), combined_img)
 
 
-def _save_fused_visualization(
-    save_dir: Path,
-    frame_idx: int,
-    fused_keypoints: np.ndarray,
-) -> np.ndarray:
-    save_dir.mkdir(parents=True, exist_ok=True)
-    outputs = [{"pred_keypoints_3d": fused_keypoints}]
-    dummy_img = np.zeros((*DUMMY_IMAGE_SIZE, 3), dtype=np.uint8)
-    kpt3d_img = visualizer.draw_3d_skeleton(
-        keypoints_3d=outputs[0]["pred_keypoints_3d"]
-    )
-    save_path = save_dir / f"frame_{frame_idx:06d}_3d_kpt.png"
-    cv2.imwrite(str(save_path), kpt3d_img)
-    return dummy_img
-
-
 def _save_frame_fuse_3dkpt_visualization(
     save_dir: Path,
     frame_idx: int,

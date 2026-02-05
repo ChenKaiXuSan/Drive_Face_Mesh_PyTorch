@@ -24,8 +24,13 @@ visualize:
 infer:
   num_inference_steps: 4
   view_list: [front, left, right]
-  fuse_method: median
 
+  workers: 32
+  person_list: [-1] # 指定需要处理的人物 ID 列表，-1 表示处理所有人物
+  env_list: [all] # 指定需要处理的环境 ID 列表，-1 表示处理所有环境
+
+fuse:
+  fuse_method: median
   # Optional: align per-view 3D outputs into a common world coordinate before fusing.
   # Each view can specify R (3x3) and t (3,) from camera to world (or world to camera).
   # transform_mode: world_to_camera uses X_world = (X_cam - t_wc) @ R,
@@ -43,10 +48,19 @@ infer:
   alignment_trim_ratio: 0.2
   alignment_max_iters: 3
 
-  workers: 32
-  person_list: [-1] # 指定需要处理的人物 ID 列表，-1 表示处理所有人物
-  env_list: [all] # 指定需要处理的环境 ID 列表，-1 表示处理所有环境
+  # ========== 融合结果与单视角对比评估配置 ==========
+  # 启用融合结果与单视角的对比评估
+  enable_fused_view_comparison: true
+  
+  # 要评估的关键点索引（默认评估前7个关键点：鼻子、眼睛、耳朵、肩膀）
+  # 0: nose, 1: left-eye, 2: right-eye, 3: left-ear, 4: right-ear
+  # 5: left-shoulder, 6: right-shoulder
+  fused_view_comparison_keypoint_indices: [0, 1, 2, 3, 4, 5, 6]
+  
+  # 是否生成可视化图表
+  enable_fused_view_comparison_plots: true
 
+  
 # ========== 时间平滑配置 ==========
 smooth:
   
@@ -123,3 +137,34 @@ smooth:
 #   temporal_smooth_method: "bilateral"
 #   temporal_smooth_sigma_space: 1.5
 #   temporal_smooth_sigma_range: 0.1
+
+# ========================================
+# 融合结果与单视角对比评估说明
+# ========================================
+
+# 此功能用于评估融合后的3D关键点与各个单视角3D关键点的质量差异
+# 
+# 输出结果：
+# <out_root>/<person_id>/<env_name>/fused_vs_views_comparison/
+#   ├── fused_vs_views_metrics.json        # JSON格式的所有指标
+#   ├── fused_vs_views_report.txt          # 详细的文本报告
+#   └── fused_vs_views_comparison.png      # 可视化对比图表（6张子图）
+#
+# 评估指标：
+# 1. 融合结果与各视角的平均距离（越小越接近该视角）
+# 2. 融合结果与视角质心的距离（越小说明融合越居中）
+# 3. 时间稳定性对比（Jitter = 加速度，越小越稳定）
+# 4. 视角间一致性（两两视角的差异，越小说明原始数据越一致）
+# 5. 各关键点与视角的详细分析
+#
+# 理想的融合结果应该：
+# - 与质心距离小（融合结果居中，没有偏向某个视角）
+# - Jitter 小于单视角（融合带来了时间平滑效果）
+# - 与各视角距离相近（融合考虑了所有视角）
+#
+# 使用方法：
+# 1. 设置 enable_fused_view_comparison: true 启用评估
+# 2. 配置 fused_view_comparison_keypoint_indices 选择要评估的关键点
+# 3. 设置 enable_fused_view_comparison_plots: true 生成可视化图表
+#
+# 详细文档：doc/FUSED_VIEW_COMPARISON_GUIDE.md

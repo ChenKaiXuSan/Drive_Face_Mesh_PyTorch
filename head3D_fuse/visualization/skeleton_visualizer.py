@@ -1,11 +1,13 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
+import logging
 from typing import Dict, Optional, Tuple, Union, cast
 
 import cv2
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
+logger = logging.getLogger(__name__)
 
 # 定义需要保留的关键点索引：头部 + 肩部/颈部 + 双手
 KEEP_KEYPOINT_INDICES = (
@@ -280,7 +282,10 @@ class SkeletonVisualizer:
 
         # center keypoints to avoid coordinate drift between frames (use neck if available)
         neck_idx = 69
-        if keypoints_3d.shape[0] > neck_idx and np.isfinite(keypoints_3d[neck_idx]).all():
+        if (
+            keypoints_3d.shape[0] > neck_idx
+            and np.isfinite(keypoints_3d[neck_idx]).all()
+        ):
             center = keypoints_3d[neck_idx]
         else:
             valid_mask = np.isfinite(keypoints_3d).all(axis=-1)

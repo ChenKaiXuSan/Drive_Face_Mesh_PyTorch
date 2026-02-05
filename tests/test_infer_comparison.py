@@ -9,8 +9,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
-from head3D_fuse.compare_fused_smoothed import KeypointsComparator
-from head3D_fuse.temporal_smooth import smooth_keypoints_sequence
+from head3D_fuse.smooth.compare_fused_smoothed import KeypointsComparator
+from head3D_fuse.smooth.temporal_smooth import smooth_keypoints_sequence
 
 
 def test_infer_comparison_flow():
