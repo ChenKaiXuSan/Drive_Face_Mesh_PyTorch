@@ -277,6 +277,20 @@ class SkeletonVisualizer:
 
         # filter keypoints
         filtered_keypoints_3d = _normalize_keypoints(keypoints_3d)
+
+        # center keypoints to avoid coordinate drift between frames (use neck if available)
+        neck_idx = 69
+        if keypoints_3d.shape[0] > neck_idx and np.isfinite(keypoints_3d[neck_idx]).all():
+            center = keypoints_3d[neck_idx]
+        else:
+            valid_mask = np.isfinite(keypoints_3d).all(axis=-1)
+            if np.any(valid_mask):
+                center = np.mean(keypoints_3d[valid_mask], axis=0)
+            else:
+                center = np.zeros(3, dtype=np.float32)
+
+        filtered_keypoints_3d = filtered_keypoints_3d - center
+        centered_keypoints_3d = keypoints_3d - center
         # draw point
         for kpt in filtered_keypoints_3d:
             ax.scatter(kpt[0], kpt[1], kpt[2], c="r", marker="o")
@@ -284,8 +298,8 @@ class SkeletonVisualizer:
         # draw links
         for edge in EDGES_FILTERED_IDX:
             kpt1_idx, kpt2_idx = edge
-            kpt1 = keypoints_3d[kpt1_idx]
-            kpt2 = keypoints_3d[kpt2_idx]
+            kpt1 = centered_keypoints_3d[kpt1_idx]
+            kpt2 = centered_keypoints_3d[kpt2_idx]
             xs = [kpt1[0], kpt2[0]]
             ys = [kpt1[1], kpt2[1]]
             zs = [kpt1[2], kpt2[2]]
