@@ -153,8 +153,8 @@ def process_single_person_env(
     for i, triplet in enumerate(
         tqdm(frame_triplets, desc=f"Fusing {person_id}/{env_name}")
     ):
-        if i == 30:
-            break  # for debug
+        # if i == 30:
+        #     break  # for debug
 
         diff = compare_npz_files(triplet.npz_paths)
         if diff:
