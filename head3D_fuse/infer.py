@@ -48,6 +48,14 @@ from head3D_fuse.visualization.vis_utils import (
     visualizer,
 )
 
+# temporal smooth
+from head3D_fuse.temporal_smooth import (
+    smooth_keypoints_sequence,
+)
+
+# comparison
+from head3D_fuse.compare_fused_smoothed import KeypointsComparator
+
 logger = logging.getLogger(__name__)
 MIN_POINTS_FOR_ALIGNMENT = 3
 VALID_ALIGNMENT_METHODS = ("none", "procrustes", "procrustes_trimmed")
@@ -119,6 +127,7 @@ def process_single_person_env(
 ):
     """处理单个人员的所有环境和视角"""
 
+    all_fused_kpts = {}
     person_id = person_env_dir.parent.name
     env_name = person_env_dir.name
     view_list = cfg.infer.get("view_list")
@@ -140,11 +149,12 @@ def process_single_person_env(
     diff_reports = []
     fused_method = cfg.infer.get("fuse_method", "median")
 
+    logger.info(f"==== Starting Fuse for Person: {person_id}, Env: {env_name} ====")
     for i, triplet in enumerate(
         tqdm(frame_triplets, desc=f"Fusing {person_id}/{env_name}")
     ):
-        # if i == 60:
-        #     break  # for debug
+        if i == 30:
+            break  # for debug
 
         diff = compare_npz_files(triplet.npz_paths)
         if diff:
@@ -204,7 +214,8 @@ def process_single_person_env(
         )
 
         # 保存融合后的关键点
-        save_dir = infer_root / person_id / env_name / "fused_npz"
+        all_fused_kpts[triplet.frame_idx] = fused_kpt
+        save_dir = infer_root / person_id / env_name /  "fused_npz"
         _save_fused_keypoints(
             save_dir=save_dir,
             frame_idx=triplet.frame_idx,
@@ -221,7 +232,7 @@ def process_single_person_env(
                     f"Missing output for view={view} frame={triplet.frame_idx}"
                 )
                 continue
-            vis_root = out_root / person_id / env_name / "different_vis"
+            vis_root = out_root / person_id / env_name / "fused" /  "different_vis"
             _save_view_visualizations(
                 output=outputs[view],
                 save_root=vis_root,
@@ -231,16 +242,9 @@ def process_single_person_env(
                 visualizer=visualizer,
             )
 
-        # if cfg.visualize.get("save_3d_keypoints", False):
-        #     _save_fused_visualization(
-        #         save_dir=out_root / person_id / env_name / "vis" / "fused_3d_keypoints",
-        #         frame_idx=triplet.frame_idx,
-        #         fused_keypoints=fused_kpt,
-        #     )
-
         # 保存三个视角的frame和融合结果的可视画
         _save_frame_fuse_3dkpt_visualization(
-            save_dir=out_root / person_id / env_name / "vis" / "vis_together",
+            save_dir=out_root / person_id / env_name / "fused" / "vis_together",
             frame_idx=triplet.frame_idx,
             fused_keypoints=fused_kpt,
             outputs=outputs,
@@ -258,7 +262,7 @@ def process_single_person_env(
 
     # 融合frame到video
     merge_frames_to_video(
-        frame_dir=out_root / person_id / env_name / "vis" / "vis_together",
+        frame_dir=out_root / person_id / env_name / "fused"  / "vis_together",
         output_video_path=out_root
         / person_id
         / env_name
@@ -268,7 +272,7 @@ def process_single_person_env(
     )
     # different view
     merge_frames_to_video(
-        frame_dir=out_root / person_id / env_name / "different_vis" / "front",
+        frame_dir=out_root / person_id / env_name / "fused" / "different_vis" / "front",
         output_video_path=out_root
         / person_id
         / env_name
@@ -277,12 +281,12 @@ def process_single_person_env(
         fps=30,
     )
     merge_frames_to_video(
-        frame_dir=out_root / person_id / env_name / "different_vis" / "left",
+        frame_dir=out_root / person_id / env_name / "fused" / "different_vis" / "left",
         output_video_path=out_root / person_id / env_name / "merged_video" / "left.mp4",
         fps=30,
     )
     merge_frames_to_video(
-        frame_dir=out_root / person_id / env_name / "different_vis" / "right",
+        frame_dir=out_root / person_id / env_name / "fused" / "different_vis" / "right",
         output_video_path=out_root
         / person_id
         / env_name
@@ -290,3 +294,150 @@ def process_single_person_env(
         / "right.mp4",
         fps=30,
     )
+
+    logger.info(f"==== Finished Fuse for Person: {person_id}, Env: {env_name} ====")
+
+    # ===================================================================
+    # 对融合后的关键点进行时间平滑处理
+    # ===================================================================
+    if all_fused_kpts and cfg.infer.get("enable_temporal_smooth", True):
+        logger.info(f"Applying temporal smoothing to {len(all_fused_kpts)} frames...")
+        
+        # 1. 将字典转换为 numpy 数组 (T, N, 3)
+        sorted_frames = sorted(all_fused_kpts.keys())
+        keypoints_array = np.stack([all_fused_kpts[idx] for idx in sorted_frames], axis=0)
+        logger.info(f"Keypoints array shape: {keypoints_array.shape}")
+        
+        # 2. 根据方法准备参数
+        smooth_method = cfg.infer.get("temporal_smooth_method", "gaussian")
+        smooth_kwargs = {}
+        
+        if smooth_method == "gaussian":
+            smooth_kwargs["sigma"] = cfg.infer.get("temporal_smooth_sigma", 1.5)
+        elif smooth_method == "savgol":
+            smooth_kwargs["window_length"] = cfg.infer.get("temporal_smooth_window_length", 11)
+            smooth_kwargs["polyorder"] = cfg.infer.get("temporal_smooth_polyorder", 3)
+        elif smooth_method == "kalman":
+            smooth_kwargs["process_variance"] = cfg.infer.get("temporal_smooth_process_variance", 1e-5)
+            smooth_kwargs["measurement_variance"] = cfg.infer.get("temporal_smooth_measurement_variance", 1e-2)
+        elif smooth_method == "bilateral":
+            smooth_kwargs["sigma_space"] = cfg.infer.get("temporal_smooth_sigma_space", 1.5)
+            smooth_kwargs["sigma_range"] = cfg.infer.get("temporal_smooth_sigma_range", 0.1)
+        
+        # 3. 执行平滑
+        smoothed_array = smooth_keypoints_sequence(
+            keypoints=keypoints_array,
+            method=smooth_method,
+            **smooth_kwargs
+        )
+        logger.info(f"Smoothed keypoints shape: {smoothed_array.shape}")
+        
+        # 4. 保存平滑后的结果
+        for i, frame_idx in enumerate(sorted_frames):
+            smooth_fused_kpt = smoothed_array[i]
+            
+            # 保存平滑后的关键点 (使用原始的 mask 和 n_valid)
+            save_dir = infer_root / person_id / env_name / "smoothed_fused_npz"
+            _save_fused_keypoints(
+                save_dir=save_dir,
+                frame_idx=frame_idx,
+                fused_keypoints=smooth_fused_kpt,
+                fused_mask=None,  # 平滑后无需 mask
+                n_valid=smooth_fused_kpt.shape[0],
+                npz_paths={},  # 平滑后无需原始路径
+            )
+
+            # 保存三个视角的frame和平滑后的结果的可视画
+            _save_frame_fuse_3dkpt_visualization(
+                save_dir=out_root / person_id / env_name / "smoothed" / "smoothed_fused" / "vis_together",
+                frame_idx=frame_idx,
+                fused_keypoints=smooth_fused_kpt,
+                outputs=outputs,
+                visualizer=visualizer,
+            )
+            
+        
+        logger.info(f"✓ Temporal smoothing completed and saved {len(sorted_frames)} frames")
+    else:
+        logger.info("Temporal smoothing is disabled or no keypoints to smooth")
+
+    # merge frame to video
+    merge_frames_to_video(
+        frame_dir=out_root / person_id / env_name / "smoothed" / "smoothed_fused" / "vis_together",
+        output_video_path=out_root
+        / person_id
+        / env_name
+        / "merged_video"
+        / "smoothed_fused_3d_keypoints.mp4",
+        fps=30,
+    )
+
+    logger.info(f"==== Finished Temporal Smoothing for Person: {person_id}, Env: {env_name} ====")
+    
+    # ===================================================================
+    # 比较平滑前后的差异并生成报告
+    # ===================================================================
+    if all_fused_kpts and cfg.infer.get("enable_temporal_smooth", True) and cfg.infer.get("enable_comparison", True):
+        logger.info("=" * 70)
+        logger.info("Comparing fused and smoothed keypoints...")
+        logger.info("=" * 70)
+        
+        try:
+            # 创建比较器
+            comparator = KeypointsComparator(keypoints_array, smoothed_array)
+            
+            # 计算所有指标
+            metrics = comparator.compute_metrics()
+            logger.info(f"Computed {len(metrics)} metrics")
+            
+            # 设置输出目录
+            comparison_dir = out_root / person_id / env_name / "comparison"
+            comparison_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 1. 保存指标到 JSON
+            metrics_path = comparison_dir / "smoothing_metrics.json"
+            with open(metrics_path, "w", encoding="utf-8") as f:
+                json.dump(metrics, f, ensure_ascii=False, indent=2)
+            logger.info(f"✓ Saved metrics to {metrics_path}")
+            
+            # 2. 生成并保存详细报告
+            report_path = comparison_dir / "smoothing_comparison_report.txt"
+            report = comparator.generate_report(save_path=report_path)
+            logger.info(f"✓ Saved report to {report_path}")
+            
+            # 打印关键指标到日志
+            logger.info("")
+            logger.info("Key Metrics Summary:")
+            logger.info(f"  Mean Difference:       {metrics['mean_difference']:.6f}")
+            logger.info(f"  Jitter Reduction:      {metrics['jitter_reduction']:.2f}%")
+            logger.info(f"  Acceleration Reduction: {metrics['acceleration_reduction']:.2f}%")
+            logger.info("")
+            
+            # 3. 生成可视化图表（如果配置启用）
+            if cfg.infer.get("enable_comparison_plots", True):
+                logger.info("Generating comparison plots...")
+                
+                # 轨迹对比图（选择代表性的关键点）
+                keypoint_indices = cfg.infer.get("comparison_keypoint_indices", [0, 5, 10])
+                trajectory_plot_path = comparison_dir / "trajectory_comparison.png"
+                comparator.plot_comparison(
+                    save_path=trajectory_plot_path,
+                    keypoint_indices=keypoint_indices
+                )
+                logger.info(f"✓ Saved trajectory plot to {trajectory_plot_path}")
+                
+                # 指标对比图
+                metrics_plot_path = comparison_dir / "metrics_comparison.png"
+                comparator.plot_metrics(save_path=metrics_plot_path)
+                logger.info(f"✓ Saved metrics plot to {metrics_plot_path}")
+            
+            logger.info("=" * 70)
+            logger.info("✓ Comparison completed successfully")
+            logger.info("=" * 70)
+            
+        except Exception as e:
+            logger.error(f"Failed to generate comparison report: {e}", exc_info=True)
+    else:
+        logger.info("Comparison is disabled or no data to compare")
+
+

@@ -46,3 +46,80 @@ infer:
   workers: 32
   person_list: [-1] # 指定需要处理的人物 ID 列表，-1 表示处理所有人物
   env_list: [all] # 指定需要处理的环境 ID 列表，-1 表示处理所有环境
+
+# ========== 时间平滑配置 ==========
+smooth:
+  
+  # 是否启用时间平滑（默认关闭）
+  enable_temporal_smooth: true
+  
+  # 平滑方法选择: "gaussian", "savgol", "kalman", "bilateral"
+  temporal_smooth_method: "gaussian"
+  
+  # ===== 方法1: Gaussian 平滑参数 =====
+  # 当 temporal_smooth_method: "gaussian" 时使用
+  temporal_smooth_sigma: 1.5  # 标准差，越大越平滑。推荐: 1.0-2.0
+  
+  # ===== 方法2: Savitzky-Golay 滤波参数 =====
+  # 当 temporal_smooth_method: "savgol" 时使用
+  # temporal_smooth_window_length: 11  # 窗口大小（必须是奇数），推荐: 7, 11, 15
+  # temporal_smooth_polyorder: 3       # 多项式阶数，推荐: 2-4
+  
+  # ===== 方法3: Kalman 滤波参数 =====
+  # 当 temporal_smooth_method: "kalman" 时使用
+  # temporal_smooth_process_variance: 1.0e-5      # 过程噪声方差
+  # temporal_smooth_measurement_variance: 1.0e-2  # 测量噪声方差
+  
+  # ===== 方法4: Bilateral 滤波参数 =====
+  # 当 temporal_smooth_method: "bilateral" 时使用
+  # temporal_smooth_sigma_space: 1.5  # 时间域标准差
+  # temporal_smooth_sigma_range: 0.1  # 值域标准差
+  
+  # ========== 平滑效果比较配置 ==========
+  
+  # 是否启用比较（生成报告和图表）
+  enable_comparison: true
+  
+  # 是否生成可视化图表
+  enable_comparison_plots: true
+  
+  # 要在轨迹图中显示的关键点索引
+  comparison_keypoint_indices: [0, 5, 10, 21, 42]  # 鼻子、肩膀、手腕等
+
+
+# ========================================
+# 不同场景的推荐配置
+# ========================================
+
+# 场景1: 快速处理，轻度平滑
+# infer:
+#   enable_temporal_smooth: true
+#   temporal_smooth_method: "gaussian"
+#   temporal_smooth_sigma: 1.0
+
+# 场景2: 保留快速动作细节
+# infer:
+#   enable_temporal_smooth: true
+#   temporal_smooth_method: "savgol"
+#   temporal_smooth_window_length: 7
+#   temporal_smooth_polyorder: 2
+
+# 场景3: 较强平滑，适合噪声大的数据
+# infer:
+#   enable_temporal_smooth: true
+#   temporal_smooth_method: "gaussian"
+#   temporal_smooth_sigma: 2.5
+
+# 场景4: 规律运动，使用卡尔曼滤波
+# infer:
+#   enable_temporal_smooth: true
+#   temporal_smooth_method: "kalman"
+#   temporal_smooth_process_variance: 1.0e-5
+#   temporal_smooth_measurement_variance: 1.0e-2
+
+# 场景5: 保留运动边界（如快速手势变化）
+# infer:
+#   enable_temporal_smooth: true
+#   temporal_smooth_method: "bilateral"
+#   temporal_smooth_sigma_space: 1.5
+#   temporal_smooth_sigma_range: 0.1
