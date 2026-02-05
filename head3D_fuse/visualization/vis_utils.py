@@ -19,6 +19,7 @@ HISTORY:
 Date      	By	Comments
 ----------	---	---------------------------------------------------------
 """
+
 import logging
 from pathlib import Path
 from typing import Any, Dict, List
@@ -36,9 +37,8 @@ DUMMY_IMAGE_SIZE = (
 )  # Placeholder size; visualize_3d_skeleton only uses it as a canvas.
 
 
-LIGHT_BLUE = (0.65098039, 0.74117647, 0.85882353)
-
 visualizer = SkeletonVisualizer(line_width=2, radius=5)
+
 
 def _save_view_visualizations(
     output: dict,
@@ -110,7 +110,7 @@ def _save_view_visualizations(
         combined_img = np.hstack(resized_images)
 
         # 保存组合图像
-        save_dir = save_root / view 
+        save_dir = save_root / view
         save_dir.mkdir(parents=True, exist_ok=True)
         save_path = save_dir / f"frame_{frame_idx:06d}.png"
         cv2.imwrite(str(save_path), combined_img)

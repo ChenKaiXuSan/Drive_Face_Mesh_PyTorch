@@ -231,12 +231,12 @@ def process_single_person_env(
                 visualizer=visualizer,
             )
 
-        if cfg.visualize.get("save_3d_keypoints", False):
-            _save_fused_visualization(
-                save_dir=out_root / person_id / env_name / "vis" / "fused_3d_keypoints",
-                frame_idx=triplet.frame_idx,
-                fused_keypoints=fused_kpt,
-            )
+        # if cfg.visualize.get("save_3d_keypoints", False):
+        #     _save_fused_visualization(
+        #         save_dir=out_root / person_id / env_name / "vis" / "fused_3d_keypoints",
+        #         frame_idx=triplet.frame_idx,
+        #         fused_keypoints=fused_kpt,
+        #     )
 
         # 保存三个视角的frame和融合结果的可视画
         _save_frame_fuse_3dkpt_visualization(
