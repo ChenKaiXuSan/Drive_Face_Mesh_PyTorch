@@ -61,7 +61,6 @@ from head3D_fuse.smooth.compare_fused_smoothed import KeypointsComparator
 from head3D_fuse.fuse.compare_fused import FusedViewComparator
 
 logger = logging.getLogger(__name__)
-MIN_POINTS_FOR_ALIGNMENT = 3
 VALID_ALIGNMENT_METHODS = ("none", "procrustes", "procrustes_trimmed")
 
 # 定义需要保留的关键点索引：头部 + 肩部/颈部 + 双手
