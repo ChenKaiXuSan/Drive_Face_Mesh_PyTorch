@@ -8,5 +8,13 @@
 			"name": "data",
 			"path": "/workspace/data"
 		},
-	]
+	],
+	"settings": {
+		"chat.tools.terminal.autoApprove": {
+			"/^cd /workspace/code/head_movement_analysis && python visualize_angles\\.py --input /workspace/data/head3d_fuse_results/01/夜多い/fused_npz --output test_angles_plot\\.png --start 619 --end 700 --no-show$/": {
+				"approve": true,
+				"matchCommandLine": true
+			}
+		}
+	}
 }
