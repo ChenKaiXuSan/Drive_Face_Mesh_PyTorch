@@ -17,6 +17,8 @@ source ${CONDA_PREFIX}/etc/profile.d/conda.sh
 conda deactivate
 conda activate /home/SSR/luoxi/miniconda3/envs/sam_3d_body
 
+conda env list
+
 # --- マッピング定義 (Dictionary形式) ---
 declare -A ID_MAP
 
@@ -69,13 +71,16 @@ START_MID_END_PATH="/work/SSR/share/data/drive/annotation/split_mid_end/mini.jso
 CKPT_ROOT="/work/SSR/share/code/Drive_Face_Mesh_PyTorch/ckpt/sam-3d-body-dinov3"
 
 echo "🏁 Node ${PBS_SUBREQNO} started at: $(date)"
+echo "Video Path: $VIDEO_PATH"
+echo "Result Output Path: $RESULT_PATH"
+echo "Checkpoint Root: $CKPT_ROOT"
 
 python -m SAM3Dbody.main \
     paths.video_path=${VIDEO_PATH} \
     paths.result_output_path=${RESULT_PATH} \
     model.root_path=${CKPT_ROOT} \
     infer.gpu="[0]" \
-    infer.workers_per_gpu=7 \
+    infer.workers_per_gpu=4 \
     infer.person_list="${PERSON_LIST}" \
     paths.start_mid_end_path=${START_MID_END_PATH}
 

@@ -109,6 +109,14 @@ def setup_sam_3d_body(
     )
     fov_path = cfg.model.get("fov_path", "") or os.environ.get("SAM3D_FOV_PATH", "")
 
+    logger.info("==== Setting up SAM 3D Body Estimator ====")
+    logger.info("  Checking model checkpoint and MHR paths...")
+    if not os.path.exists(cfg.model.checkpoint_path):
+        logger.error(f"❌ 模型 checkpoint 不存在: {cfg.model.checkpoint_path}")
+        raise FileNotFoundError(f"模型 checkpoint 不存在: {cfg.model.checkpoint_path}")
+    else:
+        logger.info(f"✅ 模型 checkpoint found: {cfg.model.checkpoint_path}")   
+        
     # -------------------- 初始化主模型 -------------------- #
     sam3d_model, model_cfg = load_sam_3d_body(
         cfg.model.checkpoint_path,
