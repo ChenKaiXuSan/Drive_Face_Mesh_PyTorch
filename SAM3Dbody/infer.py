@@ -138,6 +138,12 @@ def setup_sam_3d_body(
             path=detector_path,
         )
 
+        logger.info(f"✅ Human detector '{detector_name}' initialized.")
+    else:
+        logger.info(
+            "⚠️ No human detector specified. Will use full image or manual bbox for inference."
+        )
+
     if segmentor_name:
         from .tools.build_sam import HumanSegmentor
 
@@ -147,6 +153,12 @@ def setup_sam_3d_body(
             path=segmentor_path,
         )
 
+        logger.info(f"✅ Human segmentor '{segmentor_name}' initialized.")
+    else:
+        logger.info(
+            "⚠️ No human segmentor specified. Mask inference will be disabled."
+        )
+
     if fov_name:
         from .tools.build_fov_estimator import FOVEstimator
 
@@ -154,6 +166,11 @@ def setup_sam_3d_body(
             name=fov_name,
             device=cfg.infer.gpu,
             path=fov_path,
+        )
+        logger.info(f"✅ FOV estimator '{fov_name}' initialized.")
+    else:
+        logger.info(
+            "⚠️ No FOV estimator specified. Will use default FOV for all frames."
         )
 
     # 挂到成员变量上
