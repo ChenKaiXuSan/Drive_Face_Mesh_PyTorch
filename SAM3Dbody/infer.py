@@ -195,7 +195,12 @@ def process_frame_list(
     if start_mid_end_dict:
         start = start_mid_end_dict["start"]
         mid = start_mid_end_dict["mid"]
-        end = mid
+        end = start_mid_end_dict["end"]
+
+        # 第一阶段：只推理 start 到 mid 的部分， 以节省时间
+        # end = mid
+        # 第二阶段：只推理 mid-end 的部分， 以节省时间
+        start = mid
 
         logger.info(
             f"  根据 star, mid 信息处理帧数据: start={start}, mid={mid}, 总处理={end - start} 帧。"

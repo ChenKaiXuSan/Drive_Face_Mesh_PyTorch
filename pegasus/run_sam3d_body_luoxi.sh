@@ -1,0 +1,83 @@
+#!/bin/bash
+#PBS -A SSR
+#PBS -q gpu
+#PBS -l elapstim_req=24:00:00
+#PBS -N sam3d_4nodes_run
+#PBS -t 0-21                          # 22个
+#PBS -o logs/pegasus/sam3d_group_${PBS_SUBREQNO}.log
+#PBS -e logs/pegasus/sam3d_group_${PBS_SUBREQNO}_err.log
+
+# === 1. 環境準備 ===
+cd /work/SSR/share/code/Drive_Face_Mesh_PyTorch
+
+mkdir -p logs/pegasus/
+
+module load intelpython/2022.3.1
+source ${CONDA_PREFIX}/etc/profile.d/conda.sh
+conda deactivate
+conda activate /home/SSR/luoxi/miniconda3/envs/sam_3d_body
+
+# --- マッピング定義 (Dictionary形式) ---
+declare -A ID_MAP
+
+# 0から21までのキーにそれぞれリストを割り当て
+ID_MAP["0"]="[01]"
+ID_MAP["1"]="[02]"
+ID_MAP["2"]="[03]"
+ID_MAP["3"]="[04]"
+ID_MAP["4"]="[05]"
+ID_MAP["5"]="[06]"
+ID_MAP["6"]="[07]"
+ID_MAP["7"]="[08]"
+ID_MAP["8"]="[09]"
+ID_MAP["9"]="[10]"
+ID_MAP["10"]="[11]"
+ID_MAP["11"]="[12]"
+ID_MAP["12"]="[13]"
+ID_MAP["13"]="[14]"
+ID_MAP["14"]="[15]"
+ID_MAP["15"]="[16]"
+ID_MAP["16"]="[17]"
+ID_MAP["17"]="[18]"
+ID_MAP["18"]="[19]"
+ID_MAP["19"]="[20]"
+ID_MAP["20"]="[21]"
+ID_MAP["21"]="[24]"
+
+# ID_MAP["0"]="[01,02]"
+# ID_MAP["1"]="[03,04]"
+# ID_MAP["2"]="[05,06]"
+# ID_MAP["3"]="[07,08]"
+# ID_MAP["4"]="[09,10]"
+# ID_MAP["5"]="[11,12]"
+# ID_MAP["6"]="[13,14]"
+# ID_MAP["7"]="[15,16]"
+# ID_MAP["8"]="[17,18]"
+# ID_MAP["9"]="[19,20]"
+# ID_MAP["10"]="[21,24]"
+
+# 現在のタスク用リストを取得 (PBS_SUBREQNO は 0-21 の値をとる想定)
+PERSON_LIST=${ID_MAP[$PBS_SUBREQNO]}
+
+echo "Node Index: $PBS_SUBREQNO"
+echo "Processing folders: $PERSON_LIST"
+
+# === 3. パス設定と実行 ===
+VIDEO_PATH="/work/SSR/share/data/drive/videos_split"
+RESULT_PATH="/work/SSR/share/data/drive/sam3d_body_results_right"
+START_MID_END_PATH="/work/SSR/share/data/drive/annotation/split_mid_end/mini.json"
+CKPT_ROOT="/work/SSR/share/code/Drive_Face_Mesh_PyTorch/ckpt/sam-3d-body-dinov3"
+
+echo "🏁 Node ${PBS_SUBREQNO} started at: $(date)"
+
+python -m SAM3Dbody.main \
+    paths.video_path=${VIDEO_PATH} \
+    paths.result_output_path=${RESULT_PATH} \
+    model.root_path=${CKPT_ROOT} \
+    infer.gpu="[0]" \
+    infer.workers_per_gpu=7 \
+    infer.person_list="${PERSON_LIST}" \
+    paths.start_mid_end_path=${START_MID_END_PATH}
+
+echo "🏁 Node ${PBS_SUBREQNO} finished at: $(date)"
+# 一个node里面跑一个人的4个环境，也就是4个worker
